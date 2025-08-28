@@ -8,7 +8,7 @@ from itertools import zip_longest
 from settings import load_settings, save_settings
 from core.problem_generator import generate_problem_set
 from core.latex_generator import BlockBuilder, Problem, LaTeXRenderer, TextRenderer, LaTeX2PDF
-from utils import format_number, max_2terms
+from utils import max_2terms
 
 
 class SettingsManager:
@@ -33,6 +33,7 @@ class SettingsManager:
         if domain == 'Z':
             self.window['-FIRST_PAREN-'].update(disabled=False)
         elif domain == 'Q':
+            self.window['-FIRST_PAREN-'].update(disabled=False)
             for k in ['-QFRAC-','-IRREDUCIBLE-','-QDEC-','-DECIMAL_PLACES-']:
                 self.window[k].update(disabled=False)
 
@@ -67,6 +68,9 @@ class SettingsManager:
         s['decimal_places'] = values['-DECIMAL_PLACES-']
         s['min_val'] = values['-MIN-']
         s['max_val'] = values['-MAX-']
+        s['show_answer'] = values['-SHOW_ANSWER-']
+        s['answer_pos'] = 'new_page' if values['-ANS_NEW_PAGE-'] else 'footer'
+        s['footer_rotate'] = values['-FOOTER_ROTATE-']
         return s
 
     # --- バリデーション定義/実行 ---
@@ -177,14 +181,14 @@ class ViewBuilder:
             domain_row.append(sg.Radio(label, 'DOMAIN', key=f'-DOMAIN_{label}-', default=(label==self.settings['domain']), enable_events=True))
         
         # オプション
-        options = [sg.Frame('オプション', [
+        domain_options = [sg.Frame('オプション', [
             [sg.Checkbox('先頭の括弧', key='-FIRST_PAREN-', default=self.settings['first_paren'], disabled=True)],
             [sg.Radio('分数', 'QREP', key='-QFRAC-', default=self.settings['frac'], enable_events=True, disabled=True),
              sg.Checkbox('既約', key='-IRREDUCIBLE-', default=self.settings['irreducible'], disabled=True),
              sg.Radio('小数', 'QREP', key='-QDEC-', default=self.settings['decimal'], enable_events=True, disabled=True),
              sg.Text('小数点以下:'), sg.Spin([i for i in range(1,6)], initial_value=self.settings['decimal_places'], key='-DECIMAL_PLACES-', disabled=True)
             ]
-          ], key='-OPTIONS-', pad=(30,0))
+          ], pad=(30,0))
         ]
 
         # 0の有無ラベル
@@ -203,13 +207,19 @@ class ViewBuilder:
              sg.Text('列数:'), sg.InputText(str(self.settings['cols']), size=(5, 1), key='-NCOLS-')],
             arith_ops_row,
             domain_row,
-            options,
+            domain_options,
             allow_zero_row,
             terms_row,
             [sg.Text('乱数 最小値:'), sg.InputText(default_text=self.settings['min_val'], size=(5, 1), key='-MIN-'),
              sg.Text('最大値:'), sg.InputText(default_text=self.settings['max_val'], size=(5, 1), key='-MAX-')],
             [sg.Checkbox('重複許可', key='-ALLOW_DUP-', default=self.settings['allow_dup']),
              sg.Checkbox('= を表示', key='-SHOW_EQUAL-', default=self.settings['show_equal'])],
+            [sg.Checkbox("解答表示", key="-SHOW_ANSWER-", enable_events=True),
+                sg.Text("場所:"),
+                sg.Radio("新規ページ", "ANSWER_POS", key="-ANS_NEW_PAGE-", enable_events=True, default=True, disabled=True),
+                sg.Radio("フッター", "ANSWER_POS", key="-ANS_FOOTER-", enable_events=True, disabled=True),
+                sg.Checkbox('回転', key='-FOOTER_ROTATE-', disabled=True)
+            ]
         ]
 
         # タブ2: 展開
@@ -218,9 +228,11 @@ class ViewBuilder:
         ]
 
         tab_group = sg.TabGroup([
-            [sg.Tab('四則演算', tab_arith, key='-TAB_ARITH-'),
-             sg.Tab('展開', tab_expand, key='-TAB_EXPAND-')]
-        ], key='-TAB_GROUP-', size=(480, 260), pad=(10,5))
+            [
+            sg.Tab('四則演算', tab_arith, key='-TAB_ARITH-'),
+             # sg.Tab('展開', tab_expand, key='-TAB_EXPAND-')
+             ]
+        ], key='-TAB_GROUP-', size=(480, 300), pad=(10,5))
 
         execution_buttons = [
             sg.Button('LaTeX生成', key='-GEN_LATEX-'),
@@ -230,7 +242,7 @@ class ViewBuilder:
             sg.Button('終了')
         ]
 
-        body_frame = sg.Frame('本文設定', [[tab_group]], size=(500, 310))
+        body_frame = sg.Frame('本文設定', [[tab_group]], size=(500, 340))
 
         left_col = sg.Column([
             [doc_frame],
@@ -347,6 +359,11 @@ class MyApp:
             if event in self.link_map:
                 self._on_toggle_input(event, values[event])
 
+            if event == '-SHOW_ANSWER-':
+                self._on_show_answer_toggle(values)
+            if event in [f'-ANS_{label}-' for label in ['NEW_PAGE', 'FOOTER']]:
+                self._on_footer_opt_toggle(values)
+
             # 入力系イベント
             if event == '-NTERMS-':
                 self._on_nterms_changed(values)
@@ -372,14 +389,10 @@ class MyApp:
 
         self.settings_mgr.collect_from_values(values, self.arith_ops_dict)
         # Problem作成
-        self.problems = [Problem(expr, show_equal=self.settings.get('show_equal', True))
-                         for expr in generate_problem_set(self.settings)]
+        self.problems = [Problem(data, first_paren=self.settings.get('first_paren', False), show_equal=self.settings.get('show_equal', True))
+                         for data in generate_problem_set(self.settings)]
         self._render_all_views()
         self.log('問題生成 + ビュー更新完了')
-
-    # def _on_text_changed(self):
-    #     self.window['-UPDATE_LATEX-'].update('LaTeX更新', disabled=False)
-    #     self.window['-GEN_PDF-'].update('', disabled=True)
 
     def _on_update_latex_clicked(self, _values):
         raw_text = self.window['-TEXT_VIEW-'].get()
@@ -407,14 +420,14 @@ class MyApp:
         if sg.popup_ok_cancel(msg, keep_on_top=True) != 'OK':
             return
 
-        # 既存Problemを更新/追加
         new_problems = []
-        for i, line in enumerate(edited):
+        for i, expr_text in enumerate(edited):
+            expr_values, operators, total = Problem.parse_text_expr(expr_text)
             if i < len(self.problems):
-                self.problems[i].from_text_to_latex(line)
-                new_problems.append(self.problems[i])
+                problem = self.problems[i].from_values(expr_values, operators, total, first_paren=self.settings.get('first_paren', False), show_equal=True)
             else:
-                new_problems.append(Problem(line, show_equal=False))
+                problem = Problem.from_values(expr_values, operators, total, first_paren=self.settings.get('first_paren', False), show_equal=False)
+            new_problems.append(problem)
         self.problems = new_problems
 
         self._render_all_views(latex_only=True)
@@ -427,8 +440,15 @@ class MyApp:
         if not filename: return
         with open(filename, encoding="utf-8") as f:
             tex_content = f.read()
+
         problem_strs = TextSyncService.extract_items_from_tex(tex_content)
-        self.problems = [Problem(expr, show_equal=False) for expr in problem_strs]
+        new_problems = []
+        for i, expr_latex in enumerate(problem_strs):
+            expr_values, operators, total = Problem.parse_latex_expr(expr_latex)
+            problem = Problem.from_values(expr_values, operators, total, first_paren=self.settings.get('first_paren', False), show_equal=False)
+            new_problems.append(problem)
+        self.problems = new_problems
+        
         self._render_all_views()
         self.log('LaTeX読込完了')
 
@@ -490,6 +510,17 @@ class MyApp:
     def _on_toggle_input(self, checkbox_key, is_checked):
         for key in self.link_map[checkbox_key]:
             self.window[key].update(visible=is_checked)
+
+    def _on_show_answer_toggle(self, values):
+        show_answer = values.get('-SHOW_ANSWER-', False)
+        disabled = not show_answer
+        self.window['-ANS_NEW_PAGE-'].update(disabled=disabled)
+        self.window['-ANS_FOOTER-'].update(disabled=disabled)
+
+    def _on_footer_opt_toggle(self, values):
+        ans_footer = values.get('-ANS_FOOTER-', False)
+        disabled = not ans_footer
+        self.window['-FOOTER_ROTATE-'].update(disabled=disabled)
 
     # ---------- Render Helpers ----------
     def _render_all_views(self, latex_only=False):

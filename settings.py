@@ -49,7 +49,10 @@ ARITH_SETTINGS = {
     'irreducible': False,        # 既約にする
     'decimal_places': 2,         # 小数桁数
     'min_val': 1,                # 値の最小
-    'max_val': 9                 # 値の最大
+    'max_val': 9,                # 値の最大
+    'show_answer': False,        # 解答表示
+    'answer_pos': 'new_page',    # 表示場所
+    'footer_rotate': False       # フッターで回転させるか
 }
 
 # ------------------------

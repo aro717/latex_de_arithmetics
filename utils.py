@@ -1,32 +1,6 @@
-import fractions
+from fractions_utils import RawFraction
 
 decimal_places = 2 # デフォルト
-
-def format_number(value, first_paren=False, is_first=False):
-    """負数は括弧付きにして返す"""
-    if isinstance(value, int): # 整数
-      return f'({value})' if value < 0 and (first_paren or not is_first) else str(value)
-
-    elif isinstance(value, fractions.Fraction): # 分数(既約)
-      num, denom = value.numerator, value.denominator
-      if num < 0 and (first_paren or not is_first):
-          return f'(-\\frac{{{abs(num)}}}{{{denom}}})'
-      else:
-          return f'\\frac{{{num}}}{{{denom}}}'
-
-    elif hasattr(value, 'numerator') and hasattr(value, 'denominator'):
-      num, denom = value.numerator, value.denominator
-      if num < 0:
-        return f'-\\frac{{{abs(num)}}}{{{denom}}}' if is_first else f'(-\\frac{{{abs(num)}}}{{{denom}}})'
-      else:
-        return f'\\frac{{{num}}}{{{denom}}}'
-
-    elif isinstance(value, float):  # 小数
-      val = round(value, decimal_places)
-      return f'({val})' if val < 0 and (first_paren or not is_first) else f'{val}'
-
-    else:
-      return str(value)
 
 def max_2terms(min_val:int, max_val:int, ops:list[str], domain:str, allow_zero:bool) -> int:
     """
@@ -58,50 +32,58 @@ def max_2terms(min_val:int, max_val:int, ops:list[str], domain:str, allow_zero:b
     
     return count
 
-def number_to_latex(value, first_paren=False, is_first=False, decimal_places=2):
+def build_blocks(numbers, operators):
     """
-    数値・Fraction・RawFraction を LaTeX 表記に変換
-    - 負数はトップレベルで外にマイナス
-    - Fraction は \frac{num}{denom} 形式
-    - float は小数点以下 decimal_places で丸め
+    + / - で区切り、* / のみのブロックに分割
+    返り値: (blocks, base_ops)
+        blocks: [{'nums':[...], 'ops':[...]}...]
+        base_ops: ブロック間の ['+','-','+','-'] の列
     """
-    # 整数
-    if isinstance(value, int):
-        if value < 0 and (first_paren or not is_first):
-            return f'({value})'
-        else:
-            return str(value)
+    blocks = []
+    base_ops = []
+    current = {'nums': [], 'ops': []}
 
-    # Fraction / RawFraction
-    elif hasattr(value, 'numerator') and hasattr(value, 'denominator'):
-        num, denom = value.numerator, value.denominator
-        if num < 0:
-            if first_paren or not is_first:
-                return f'(-\\frac{{{abs(num)}}}{{{denom}}})'
+    for i, op in enumerate(operators):
+        # まず i 番目の数を積む
+        current['nums'].append(numbers[i])
+
+        if op in ('*', '/'):
+            current['ops'].append(op)
+        else:
+            # ブロック終了
+            blocks.append(current)
+            base_ops.append(op)    # ブロック間の + / -
+            current = {'nums': [], 'ops': []}
+
+    # 最後の数を積んでラストブロックを追加
+    current['nums'].append(numbers[-1])
+    blocks.append(current)
+    return blocks, base_ops
+
+def value_as_fraction(val):
+    if isinstance(val, RawFraction):
+        return val.to_fraction()
+    return val
+
+def evaluate_blocks(blocks, base_ops):
+    """
+    +-で分けたblock毎の評価をし、左から+-する
+    """
+    blocks_values = []
+    for blk in blocks:
+        current = value_as_fraction(blk['nums'][0])
+        for i, op in enumerate(blk['ops']):
+            nxt = value_as_fraction(blk['nums'][i + 1])
+            if op == '*':
+                current *= nxt
             else:
-                return f'-\\frac{{{abs(num)}}}{{{denom}}}'
+                current /= nxt
+        blocks_values.append(current)
+    total = blocks_values[0]
+    for i, op in enumerate(base_ops):
+        if op == '+':
+            total += blocks_values[i + 1]
         else:
-            return f'\\frac{{{num}}}{{{denom}}}'
+            total -= blocks_values[i + 1]
 
-    # float
-    elif isinstance(value, float):
-        val = round(value, decimal_places)
-        if val < 0 and (first_paren or not is_first):
-            return f'({val})'
-        else:
-            return str(val)
-
-    # その他
-    else:
-        return str(value)
-
-
-def text_to_latex(expr_text):
-    r"""
-    Textビューの式を LaTeX 形式に変換
-    - × -> \times
-    - ÷ -> \div
-    - すでに \frac{}{} 形式の分数はそのまま
-    """
-    latex = expr_text.replace('×', r'\times').replace('÷', r'\div')
-    return latex
+    return total

@@ -1,23 +1,8 @@
 import random
-import fractions
-from utils import format_number, max_2terms
+from fractions import Fraction
+from utils import max_2terms, build_blocks
+from fractions_utils import RawFraction, paren_if_negative
 from math import gcd
-
-
-# ------------------------------
-# RawFraction:
-# ------------------------------
-class RawFraction:
-        """既約でない分数を保持する専用クラス"""
-        def __init__(self, numerator, denominator):
-                self.numerator = numerator
-                self.denominator = denominator
-
-        def __repr__(self):
-                return f'RawFraction({self.numerator}, {self.denominator})'
-
-        def __str__(self):
-                return f'{self.numerator}/{self.denominator}'
 
 
 # ------------------------------
@@ -48,10 +33,14 @@ def generate_value(settings, allow_zero=None):
             numerators = [x for x in numerators if x != 0]
         denominators = list(range(max(1, min_val), max_val + 1))
         for num in numerators:
+            if num == 0:
+                # 分母に関係なく 0 は一度だけ追加
+                candidates.append(0)
+                continue
             for denom in denominators:
                 if q_repr == 'frac': # 分数
                     if irreducible:
-                        frac = fractions.Fraction(num, denom)
+                        frac = Fraction(num, denom)
                         if frac.denominator == 1:
                             frac = frac.numerator
                         candidates.append(frac)
@@ -61,7 +50,7 @@ def generate_value(settings, allow_zero=None):
                         else:
                             candidates.append(RawFraction(num, denom))
                 else: # 小数
-                    frac = fractions.Fraction(num, denom)
+                    frac = Fraction(num, denom)
                     val = round(float(frac), decimal_places)
                     candidates.append(val)
     else:
@@ -76,39 +65,11 @@ def generate_value(settings, allow_zero=None):
         if domain in ['N', 'Z']:
             return min_val
         elif domain == 'Q':
-            return fractions.Fraction(min_val, 1)
+            return Fraction(min_val, 1)
         else:
             return min_val
 
     return random.choice(candidates)
-
-def build_blocks(numbers, operators):
-    """
-    + / - で区切り、* / のみのブロックに分割
-    返り値: (blocks, base_ops)
-        blocks: [{'nums':[...], 'ops':[...]}...]
-        base_ops: ブロック間の ['+','-','+','-'] の列
-    """
-    blocks = []
-    base_ops = []
-    current = {'nums': [], 'ops': []}
-
-    for i, op in enumerate(operators):
-        # まず i 番目の数を積む
-        current['nums'].append(numbers[i])
-
-        if op in ('*', '/'):
-            current['ops'].append(op)
-        else:
-            # ブロック終了
-            blocks.append(current)
-            base_ops.append(op)    # ブロック間の + / -
-            current = {'nums': [], 'ops': []}
-
-    # 最後の数を積んでラストブロックを追加
-    current['nums'].append(numbers[-1])
-    blocks.append(current)
-    return blocks, base_ops
 
 def evaluate_block(block):
     """
@@ -254,9 +215,10 @@ def generate_one_problem(settings):
     # --- 演算子を決定 ---
     operators = [random.choice(selected_ops) for _ in range(n_terms - 1)]
 
+    numbers = []
+
     # --- 数値生成 ---
     if domain == 'N':
-        numbers = []
         for i in range(n_terms):
             # 直前が '/' のときは 0 を避ける
             if i > 0 and operators[i - 1] == '/':
@@ -264,26 +226,16 @@ def generate_one_problem(settings):
             else:
                 num = generate_value(settings, allow_zero=allow_zero)
             numbers.append(num)
-
-        # ブロック化 → 評価（割り算調整）→ 減算回避の並べ替え
-        blocks, base_ops = build_blocks(numbers, operators)
-        expr, _total = assemble_expr(blocks, base_ops, max_val)
-
-        return expr
-
-    numbers = []
-    if '/' in operators and domain in ['Z']:
+    elif domain == 'Z':
+    # if '/' in operators and domain in ['Z']:
         # / が含まれる場合の処理
-        for idx in range(n_terms):
+        for i in range(n_terms):
             # 直前が / の場合は 0 を避ける
-            force_nonzero = (idx > 0 and operators[idx - 1] == '/')
-            num = generate_value(
-                settings,
-                allow_zero=(allow_zero and not force_nonzero)
-            )
+            force_nonzero = (i > 0 and operators[i - 1] == '/')
+            num = generate_value(settings, allow_zero=(allow_zero and not force_nonzero))
             numbers.append(num)
-
-        seg_start = 0 # 現在の割り算チェーンの分子となる項のインデックス
+        # 割り算チェーン調整
+        seg_start = 0
         for i, op in enumerate(operators):
             if op == '/':
                 # 直前が/のとき
@@ -293,15 +245,44 @@ def generate_one_problem(settings):
             else:
                 # 非'/'でセグメントをリセット
                 seg_start = i + 1
-
+    elif domain == 'Q':
+        for i in range(n_terms):
+            # 直前が / の場合は 0 を避ける
+            force_nonzero = (i > 0 and operators[i - 1] == '/')
+            num = generate_value(settings, allow_zero=(allow_zero and not force_nonzero))
+            numbers.append(num)
     else:
         numbers = [generate_value(settings) for _ in range(n_terms)]
 
-    # --- 式を組み立て ---
-    expr = format_number(numbers[0], first_paren, is_first=True)
-    for op, num in zip(operators, numbers[1:]):
-        expr += f' {op} {format_number(num)}'
-    return expr
+    if domain in ['N', 'Z']:
+        # ブロック化 → 評価（割り算調整）→ 減算回避の並べ替え
+        blocks, base_ops = build_blocks(numbers, operators)
+        expr_str, total = assemble_expr(blocks, base_ops, max_val)
+    else:
+        # Q や他のドメインは単純連結
+        expr_str = paren_if_negative(numbers[0], first_paren, is_first=True)
+        total = numbers[0]
+        if isinstance(total, RawFraction):
+            total = Fraction(num.numerator, num.denominator)
+        for op, num in zip(operators, numbers[1:]):
+            if isinstance(num, RawFraction):
+                num = Fraction(num.numerator, num.denominator)
+            expr_str += f' {op} {paren_if_negative(num)}'
+            if op == '+':
+                total += num
+            elif op == '-':
+                total -= num
+            elif op == '*':
+                total *= num
+            elif op == '/':
+                total /= num
+
+    return {
+        'expr_str': expr_str, # 重複判定用
+        'expr_values': numbers,
+        'operators': operators,
+        'total': total
+    }
 
 def generate_problem_set(settings):
     num_problems = int(settings['num_problems'])
@@ -316,11 +297,13 @@ def generate_problem_set(settings):
         # 重複なし
         all_expr = set()
         while len(all_expr) < num_problems:
-            expr = generate_one_problem(settings)
-            all_expr.add(expr)
+            data = generate_one_problem(settings)
+            if data['expr_str'] not in all_expr:
+                all_expr.add(data['expr_str'])
+                problems.append(data)
             # 無限ループ防止
             if len(all_expr) > 100000:
                 raise ValueError('生成可能なユニーク問題数を超えています')
-        problems = list(all_expr)
+        # problems = list(all_expr)
         
     return problems
