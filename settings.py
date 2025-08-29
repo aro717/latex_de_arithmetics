@@ -1,15 +1,17 @@
 import os
+import sys
 import json
 from datetime import datetime
 
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'settings.json')
+# SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'settings.json')
 
 # ------------------------------
 # 用紙・レイアウト設定
 # ------------------------------
 DOC_SETTINGS = {
+    'window_location': (10, 25),   # 起動時のwindowの位置
     'file_name': 'output',
-    'last_output_dir': os.path.join(os.path.dirname(__file__), 'outputs'),
+    'dir_name': '.',
     'paper_size': 'A4',          # 'A3', 'A4', 'A5', 'B4', 'B5'
     'font_size': '11pt',         # '10pt', '11pt', '12pt'
     'margin_top': 25,            # mm
@@ -18,7 +20,7 @@ DOC_SETTINGS = {
     'margin_right': 15,
     'landscape': False,
     'title_check': False,
-    'title': '',                 # 表題
+    'title': 'LaTeX de Arithmetics',                 # 表題
     'date_check': False,
     'date': '',                  # 日付 YYYY/MM/DD
     'name_check': False,
@@ -52,7 +54,10 @@ ARITH_SETTINGS = {
     'max_val': 9,                # 値の最大
     'show_answer': False,        # 解答表示
     'answer_pos': 'new_page',    # 表示場所
-    'footer_rotate': False       # フッターで回転させるか
+    'ans_new_page': True,
+    'ans_footer': False,
+    'footer_rotate': False,      # フッターで回転させるか
+    'seed': 1,
 }
 
 # ------------------------
@@ -69,24 +74,21 @@ DEFAULT_SETTINGS.update(ARITH_SETTINGS)
 DEFAULT_SETTINGS.update(EXPAND_SETTINGS)
 
 
-def load_settings():
-    """settings.jsonから読み込み、存在しなければデフォルトを返す"""
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
-            try:
-                settings = json.load(f)
-            except json.JSONDecodeError:
-                print('settings.jsonが壊れていたのでデフォルトを読み込みます')
-                settings = DEFAULT_SETTINGS.copy()
-    else:
-        settings = DEFAULT_SETTINGS.copy()
+def get_settings_path():
+    if getattr(sys, 'frozen', False):  # exe化された場合
+        base_dir = os.path.dirname(sys.executable)
+    else:  # 開発中
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_dir, "settings.json")
 
-    # 日付が空なら今日の日付を入れる
-    if not settings.get('date'):
-        settings['date'] = datetime.now().strftime('%Y/%m/%d')
-    return settings
+def load_settings():
+    path = get_settings_path()
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}  # デフォルト設定
 
 def save_settings(settings: dict):
-    """settigns.jsonに保存"""
-    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    path = get_settings_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)

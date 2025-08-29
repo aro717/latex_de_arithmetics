@@ -87,3 +87,13 @@ def evaluate_blocks(blocks, base_ops):
             total -= blocks_values[i + 1]
 
     return total
+
+def dict_diff(old: dict, new: dict) -> dict:
+    """
+    2つのdictの差分を {キー: (old_value, new_value)} の形で返す
+    """
+    return {
+        k: (old.get(k), new.get(k))
+        for k in new.keys() | old.keys()  # 両方にあるキーの和集合
+        if old.get(k) != new.get(k)
+    }

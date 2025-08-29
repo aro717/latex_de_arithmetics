@@ -124,7 +124,7 @@ class Problem:
         if pdf_mode:
             latex = latex.replace('(', r'\left(').replace(')', r'\right)')
         # show_equalがTrueなら末尾に「=」を付ける
-        if self.show_equal:
+        if self.show_equal or show_answer:
             latex = latex.rstrip()  # 念のため空白除去
             if not latex.endswith('='):
                 latex += ' ='
@@ -359,6 +359,9 @@ class LaTeXRenderer:
         num_problems = len(self.builder.problems)
         per_col = (num_problems + cols - 1) // cols
         landscape_opt = ',landscape' if self.settings['landscape'] else ''
+        title = self.settings['title'] if self.settings['title_check'] else ''
+        date = self.settings['date'] if self.settings['date_check'] else ''
+        name = self.settings['name'] if self.settings['name_check'] else ''
 
         if self.settings['show_answer'] and self.settings['answer_pos'] == 'footer':
             answers = self.render_answers(self.builder.problems, per_col, show_answer=self.settings['show_answer'], answer_pos=self.settings['answer_pos'], footer_rotate=self.settings['footer_rotate'])
@@ -375,9 +378,9 @@ class LaTeXRenderer:
 \\pagestyle{{fancy}}
 \\fancyhf{{}}
 \\renewcommand{{\\footrulewidth}}{{0pt}}
-\\fancyhead[L]{{{self.settings['title']}}}
-\\fancyhead[C]{{{self.settings['date']}}}
-\\fancyhead[R]{{{self.settings['name']}}}
+\\fancyhead[L]{{{title}}}
+\\fancyhead[C]{{{date}}}
+\\fancyhead[R]{{{name}}}
 {answers}
 \\begin{{document}}
 """.strip()
@@ -456,7 +459,7 @@ class TextRenderer:
         self.builder = builder
 
     def render(self):
-        header = f'[改行: {self.builder.settings.get('cols', 1)}]'
+        header = f"[改行: {self.builder.settings.get('cols', 1)}]"
         body = self.builder.build_block('text')
         return header + '\n' + body
 
@@ -468,7 +471,7 @@ class LaTeX2PDF:
     def __init__(self, latex_str: str, settings=None, cleanup=True):
         self.settings = settings
         # 出力先ディレクトリを settings から取得
-        self.output_dir = settings.get('last_output_dir', '.') if settings else '.'
+        self.output_dir = settings.get('dir_name', '.') if settings else '.'
         os.makedirs(self.output_dir, exist_ok=True)
         self.cleanup = cleanup    # True なら中間ファイルを削除
         self.latex_str = latex_str
@@ -488,14 +491,16 @@ class LaTeX2PDF:
                 os.remove(path)
 
     def compile_pdf(self, filename='output'):
-        tex_path = os.path.join(self.output_dir, f'{filename}.tex')
-        pdf_path = os.path.join(self.output_dir, f'{filename}.pdf')
+        # tex_path = os.path.join(self.output_dir, f'{filename}.tex')
+        # pdf_path = os.path.join(self.output_dir, f'{filename}.pdf')
+        tex_path = f'{filename}.tex'
+        pdf_path = f'{filename}.pdf'
 
         with open(tex_path, 'w', encoding='utf-8') as f:
             f.write(self.latex_str)
         try:
-            subprocess.run(['platex', tex_path], check=True)
-            subprocess.run(['dvipdfmx', tex_path.replace('.tex', '.dvi')], check=True)
+            subprocess.run(['platex', '-interaction=nonstopmode', tex_path], check=True, cwd=self.output_dir)
+            subprocess.run(['dvipdfmx', tex_path.replace('.tex', '.dvi')], check=True, cwd=self.output_dir)
 
             # 中間ファイル削除
             if self.cleanup:

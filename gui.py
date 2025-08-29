@@ -8,7 +8,7 @@ from itertools import zip_longest
 from settings import load_settings, save_settings
 from core.problem_generator import generate_problem_set
 from core.latex_generator import BlockBuilder, Problem, LaTeXRenderer, TextRenderer, LaTeX2PDF
-from utils import max_2terms
+from utils import max_2terms, dict_diff
 
 
 class SettingsManager:
@@ -22,12 +22,12 @@ class SettingsManager:
     def apply_to_gui(self):
         s = self.settings
         # ヘッダ表示
-        if s['title_check']:
-            self.window['-IN_TITLE-'].update(visible=True)
-        if s['date_check']:
-            self.window['-IN_DATE-'].update(visible=True)
-        if s['name_check']:
-            self.window['-IN_NAME-'].update(visible=True)
+        # if s['title_check']:
+        #     self.window['-IN_TITLE-'].update(visible=True)
+        # if s['date_check']:
+        #     self.window['-IN_DATE-'].update(visible=True)
+        # if s['name_check']:
+        #     self.window['-IN_NAME-'].update(visible=True)
         # ドメイン別の有効/無効
         domain = s['domain']
         if domain == 'Z':
@@ -36,10 +36,17 @@ class SettingsManager:
             self.window['-FIRST_PAREN-'].update(disabled=False)
             for k in ['-QFRAC-','-IRREDUCIBLE-','-QDEC-','-DECIMAL_PLACES-']:
                 self.window[k].update(disabled=False)
+        # 解答表示の有効/無効
+        if s['show_answer']:
+            self.window['-ANS_NEW_PAGE-'].update(disabled=False)
+            self.window['-ANS_FOOTER-'].update(disabled=False)
+            if s['ans_footer']:
+                self.window['-FOOTER_ROTATE-'].update(disabled=False)
 
     # --- 収集 ---
     def collect_from_values(self, values, arith_ops_dict):
         s = self.settings
+        s['dir_name'] = values['-DIR_NAME-']
         s['file_name'] = values['-FILE_NAME-']
         s['paper_size'] = values['-PAPER-']
         s['font_size'] = values['-FONTSIZE-']
@@ -49,11 +56,11 @@ class SettingsManager:
         s['margin_right'] = int(values['-MRIGHT-'])
         s['landscape'] = values['-CHK_LANDSCAPE-']
         s['title_check'] = values['-CHK_TITLE-']
-        s['title'] = values['-IN_TITLE-'] if values['-CHK_TITLE-'] else ''
+        s['title'] = values['-IN_TITLE-']
         s['date_check'] = values['-CHK_DATE-']
-        s['date'] = values['-IN_DATE-'] if values['-CHK_DATE-'] else ''
+        s['date'] = values['-IN_DATE-']
         s['name_check'] = values['-CHK_NAME-']
-        s['name'] = values.get('-IN_NAME-') if values['-CHK_NAME-'] else ''
+        s['name'] = values.get('-IN_NAME-')
         s['num_problems'] = int(values['-NPROBLEMS-'])
         s['cols'] = int(values['-NCOLS-'])
         s['n_terms'] = int(values.get('-NTERMS-', 2))
@@ -70,8 +77,40 @@ class SettingsManager:
         s['max_val'] = values['-MAX-']
         s['show_answer'] = values['-SHOW_ANSWER-']
         s['answer_pos'] = 'new_page' if values['-ANS_NEW_PAGE-'] else 'footer'
+        s['ans_new_page'] = values['-ANS_NEW_PAGE-']
+        s['ans_footer'] = values['-ANS_FOOTER-']
         s['footer_rotate'] = values['-FOOTER_ROTATE-']
+        # s['seed'] = values['-SEED-']
         return s
+
+    def update_from_values(self, values, arith_ops_dict):
+        s = {}
+        s['dir_name'] = values['-DIR_NAME-']
+        s['file_name'] = values['-FILE_NAME-']
+        s['paper_size'] = values['-PAPER-']
+        s['font_size'] = values['-FONTSIZE-']
+        s['margin_top'] = int(values['-MTOP-'])
+        s['margin_bottom'] = int(values['-MBOTTOM-'])
+        s['margin_left'] = int(values['-MLEFT-'])
+        s['margin_right'] = int(values['-MRIGHT-'])
+        s['landscape'] = values['-CHK_LANDSCAPE-']
+        s['title_check'] = values['-CHK_TITLE-']
+        s['title'] = values['-IN_TITLE-']
+        s['date_check'] = values['-CHK_DATE-']
+        s['date'] = values['-IN_DATE-']
+        s['name_check'] = values['-CHK_NAME-']
+        s['name'] = values.get('-IN_NAME-')
+        s['cols'] = int(values['-NCOLS-'])
+        s['show_equal'] = values['-SHOW_EQUAL-']
+        s['first_paren'] = values['-FIRST_PAREN-']
+        s['show_answer'] = values['-SHOW_ANSWER-']
+        s['answer_pos'] = 'new_page' if values['-ANS_NEW_PAGE-'] else 'footer'
+        s['ans_new_page'] = values['-ANS_NEW_PAGE-']
+        s['ans_footer'] = values['-ANS_FOOTER-']
+        s['footer_rotate'] = values['-FOOTER_ROTATE-']
+        s = self.settings | s
+        diff = dict_diff(s, self.settings)
+        return s, diff
 
     # --- バリデーション定義/実行 ---
     def set_validation_rules(self, rules):
@@ -134,17 +173,20 @@ class ViewBuilder:
         self.link_map = {
             '-CHK_TITLE-': ['-IN_TITLE-'],
             '-CHK_DATE-': ['-IN_DATE-', '-BTN_DATE-'],
-            '-CHK_NAME-': ['-IN_NAME-']
+            '-CHK_NAME-': ['-IN_NAME-'],
+            '-USE_SEED-': ['-SEED-']
         }
 
     def build(self):
         s = self.settings
         # --- ドキュメント設定 ---
         doc_frame = sg.Frame('ドキュメント設定', [
-            [sg.Text('ファイル名:'), sg.InputText(default_text=s['file_name'], key='-FILE_NAME-', size=(30, 1))],
+            [sg.Text('出力フォルダ:'), sg.InputText(default_text=s['dir_name'], key='-DIR_NAME-', size=(15, 1)),
+             sg.Button('選択', target='-DIR_NAME-', key='-SELECT_DIR-', pad=(0,0)),
+             sg.Text('ファイル名:'), sg.InputText(default_text=s['file_name'], key='-FILE_NAME-')],
             [sg.Text('用紙サイズ:'), sg.Combo(['A3','A4','A5','B4','B5'], default_value=s['paper_size'], key='-PAPER-'),
              sg.Checkbox('横向き', key='-CHK_LANDSCAPE-', default=s['landscape']),
-             sg.Text('フォントサイズ:'), sg.Combo(['10pt','11pt','12pt'], key='-FONTSIZE-', default_value=s['font_size'])],
+             sg.Text('基準フォントサイズ:'), sg.Combo(['10pt','11pt','12pt'], key='-FONTSIZE-', default_value=s['font_size'])],
             [sg.Text('余白(mm): 上'), sg.InputText(str(s['margin_top']), size=(4, 1), key='-MTOP-'),
              sg.Text('下'), sg.InputText(str(s['margin_bottom']), size=(4, 1), key='-MBOTTOM-'),
              sg.Text('左'), sg.InputText(str(s['margin_left']), size=(4, 1), key='-MLEFT-'),
@@ -154,12 +196,12 @@ class ViewBuilder:
         # --- ヘッダ設定 ---
         header_frame = sg.Frame('ヘッダ設定', [
             [sg.Checkbox('表題', key='-CHK_TITLE-', default=s['title_check'], enable_events=True),
-             sg.InputText(default_text=s['title'], key='-IN_TITLE-', visible=False, size=(30, 1))],
+             sg.InputText(default_text=s['title'], key='-IN_TITLE-', disabled=True),],
             [sg.Checkbox('日付', key='-CHK_DATE-', default=s['date_check'], enable_events=True),
-             sg.InputText(default_text=s['date'], key='-IN_DATE-', visible=False, size=(12, 1)),
-             sg.CalendarButton('選択', target='-IN_DATE-', format='%Y/%m/%d', visible=False, key='-BTN_DATE-', size=(10,1), pad=(0,0))],
+             sg.InputText(default_text=s['date'], key='-IN_DATE-', size=(12, 1), disabled=True),
+             sg.CalendarButton('選択', target='-IN_DATE-', format='%Y/%m/%d', disabled=True, key='-BTN_DATE-', size=(5,1), pad=(0,0))],
             [sg.Checkbox('氏名', key='-CHK_NAME-', default=s['name_check'], enable_events=True),
-             sg.InputText(default_text=s['name'], key='-IN_NAME-', visible=False, size=(30, 1))],
+             sg.InputText(default_text=s['name'], key='-IN_NAME-', disabled=True)],
         ], size=(500, 110))
 
         # --- 本文設定 ---
@@ -172,7 +214,9 @@ class ViewBuilder:
             '-DIV-': '/'
         }
         self.ops_keys = list(self.arith_ops_dict.keys())
-        arith_ops_row = [sg.Checkbox(self.ops_dict[op], key=k, default=self.settings['ops'][op]) for k, op in self.arith_ops_dict.items()]
+        arith_ops_row = [sg.Text('演算:')]
+        for k, op in self.arith_ops_dict.items():
+            arith_ops_row.append(sg.Checkbox(self.ops_dict[op], key=k, default=self.settings['ops'][op]))
 
         # self.domain_options = ['N', 'Z', 'Q', 'R', 'C']
         self.domain_options = ['N', 'Z', 'Q']
@@ -209,16 +253,19 @@ class ViewBuilder:
             domain_row,
             domain_options,
             allow_zero_row,
-            terms_row,
             [sg.Text('乱数 最小値:'), sg.InputText(default_text=self.settings['min_val'], size=(5, 1), key='-MIN-'),
-             sg.Text('最大値:'), sg.InputText(default_text=self.settings['max_val'], size=(5, 1), key='-MAX-')],
-            [sg.Checkbox('重複許可', key='-ALLOW_DUP-', default=self.settings['allow_dup']),
+             sg.Text('最大値:'), sg.InputText(default_text=self.settings['max_val'], size=(5, 1), key='-MAX-'),
+             # sg.Checkbox('Seed値:', key='-USE_SEED-', default=False, enable_events=True),
+             # sg.InputText(default_text=self.settings['seed'], key='-SEED-', disabled=True)
+            ],
+            terms_row,
+            [sg.Checkbox('問題の重複許可', key='-ALLOW_DUP-', default=self.settings['allow_dup']),
              sg.Checkbox('= を表示', key='-SHOW_EQUAL-', default=self.settings['show_equal'])],
-            [sg.Checkbox("解答表示", key="-SHOW_ANSWER-", enable_events=True),
+            [sg.Checkbox("解答表示", key="-SHOW_ANSWER-", default=self.settings['show_answer'], enable_events=True),
                 sg.Text("場所:"),
-                sg.Radio("新規ページ", "ANSWER_POS", key="-ANS_NEW_PAGE-", enable_events=True, default=True, disabled=True),
-                sg.Radio("フッター", "ANSWER_POS", key="-ANS_FOOTER-", enable_events=True, disabled=True),
-                sg.Checkbox('回転', key='-FOOTER_ROTATE-', disabled=True)
+                sg.Radio("新規ページ", "ANSWER_POS", key="-ANS_NEW_PAGE-", default=self.settings['ans_new_page'], enable_events=True, disabled=True),
+                sg.Radio("フッタ", "ANSWER_POS", key="-ANS_FOOTER-", default=self.settings['ans_footer'], enable_events=True, disabled=True),
+                sg.Checkbox('回転', key='-FOOTER_ROTATE-', default=self.settings['footer_rotate'], disabled=True)
             ]
         ]
 
@@ -233,6 +280,7 @@ class ViewBuilder:
              # sg.Tab('展開', tab_expand, key='-TAB_EXPAND-')
              ]
         ], key='-TAB_GROUP-', size=(480, 300), pad=(10,5))
+        # ], key='-TAB_GROUP-', size=(480, 300), pad=(10,5)) # win用
 
         execution_buttons = [
             sg.Button('LaTeX生成', key='-GEN_LATEX-'),
@@ -243,12 +291,14 @@ class ViewBuilder:
         ]
 
         body_frame = sg.Frame('本文設定', [[tab_group]], size=(500, 340))
+        # body_frame = sg.Frame('本文設定', [[tab_group]], size=(500, 340)) # win用
 
         left_col = sg.Column([
             [doc_frame],
             [header_frame],
             [body_frame],
             [sg.Multiline('', key='-LOG-', size=(60, 10),
+            # [sg.Multiline('', key='-LOG-', size=(69, 8), # win用
                 text_color='white', background_color='black',
                 autoscroll=True, disabled=True)]
         #   [sg.Button('LaTeX生成', key='-GEN_LATEX-'), sg.Button('PDF生成', key='-GEN_PDF-'), sg.Button('終了')]
@@ -285,7 +335,13 @@ class MyApp:
 
         # --- View ---
         self.view = ViewBuilder(self.settings)
-        self.window = sg.Window('LaTeX de Arithmetics', self._build_layout(), finalize=True)
+        last_loc = self.settings.get('window_location', (5, 5))
+        self.window = sg.Window(
+            'LaTeX de Arithmetics',
+            self._build_layout(),
+            location=last_loc,
+            finalize=True
+        )
         self.link_map = self._link_map()  # 既存の link_map を返す小ヘルパーでもOK
 
         # --- Services ---
@@ -311,7 +367,10 @@ class MyApp:
         return {
           '-CHK_TITLE-': ['-IN_TITLE-'],
           '-CHK_DATE-': ['-IN_DATE-', '-BTN_DATE-'],
-          '-CHK_NAME-': ['-IN_NAME-']
+          '-CHK_NAME-': ['-IN_NAME-'],
+          '-USE_SEED-': ['-SEED-'],
+          # '-SHOW_ANSWER-': ['-ANS_NEW_PAGE-', '-ANS_FOOTER-'],
+          # '-ANS_FOOTER-': ['-FOOTER_ROTATE-']
         }
 
     # ---------- Validation ----------
@@ -349,10 +408,17 @@ class MyApp:
             '-UPDATE_LATEX-': self._on_update_latex_clicked,
             '-LOAD_LATEX-': self._on_load_latex_clicked,
             '-GEN_PDF-': self._on_generate_pdf_clicked,
+            '-SELECT_DIR-': self._on_dir_clicked,
         }
         while True:
             event, values = self.window.read(timeout=100) # timeoutでポーリング
             if event in (sg.WINDOW_CLOSED, '終了'):
+                # 閉じる直前に位置を保存
+                loc = self.window.current_location()
+                if loc == (None, None):
+                    loc = self.settings.get('window_location', (10, 25))
+                self.settings['window_location'] = loc
+                save_settings(self.settings)
                 break
 
             # 共通：チェックボックス可視切替
@@ -383,6 +449,24 @@ class MyApp:
         self.window.close()
 
     # ---------- Handlers ----------
+    def _on_dir_clicked(self, values):
+        """
+        ユーザーに出力ディレクトリを選ばせる
+        default_path: 最初に表示するフォルダ
+        戻り値: 選択したパス、キャンセルなら None
+        """
+        current_dir = os.getcwd()
+        folder = sg.popup_get_folder(
+            "PDFの出力先フォルダを選択してください",
+            default_path=current_dir or os.path.expanduser("~"),
+            no_window=True
+        )
+        if folder and os.path.isdir(folder):
+            if '~' in folder:
+                folder = os.path.relpath(folder, start=current_dir) # 相対パス
+            self.window['-DIR_NAME-'].update(folder)
+        return None
+
     def _on_generate_clicked(self, values):
         errs = self.settings_mgr.validate(values)
         if errs: return self.log('\n'.join(errs), error=True)
@@ -424,13 +508,17 @@ class MyApp:
         for i, expr_text in enumerate(edited):
             expr_values, operators, total = Problem.parse_text_expr(expr_text)
             if i < len(self.problems):
-                problem = self.problems[i].from_values(expr_values, operators, total, first_paren=self.settings.get('first_paren', False), show_equal=True)
+                problem = self.problems[i].from_values(expr_values, operators, total, first_paren=self.settings.get('first_paren', False), show_equal=self.settings.get('show_equal', False))
             else:
-                problem = Problem.from_values(expr_values, operators, total, first_paren=self.settings.get('first_paren', False), show_equal=False)
+                problem = Problem.from_values(expr_values, operators, total, first_paren=self.settings.get('first_paren', False), show_equal=self.settings.get('show_equal', False))
             new_problems.append(problem)
         self.problems = new_problems
 
-        self._render_all_views(latex_only=True)
+        diff_settings = self._update_settings(_values)
+        if diff_settings:
+            self._render_all_views()
+        else:
+            self._render_all_views(latex_only=True)
         self.window['-UPDATE_LATEX-'].update('', disabled=True)
         self.window['-GEN_PDF-'].update('PDF生成', disabled=False)
         self.log('LaTeX更新完了')
@@ -453,11 +541,14 @@ class MyApp:
         self.log('LaTeX読込完了')
 
     def _on_generate_pdf_clicked(self, values):
-        filename = values['-FILE_NAME-'].strip() or sg.popup_get_text('ファイル名を入力してください')
+        diff_settings = self._update_settings(values)
+        filename = self.settings['file_name'].strip() or sg.popup_get_text('ファイル名を入力してください')
         if not filename: return
         builder = BlockBuilder(self.problems, self.settings)
         latex_renderer = LaTeXRenderer(builder, self.settings)
         latex_str = latex_renderer.render_pdf()
+        if diff_settings:
+            self._render_all_views()
         pdf_gen = LaTeX2PDF.from_latex(latex_str, self.settings)
         pdf_path = pdf_gen.compile_pdf(filename)
         save_settings(self.settings)
@@ -509,13 +600,15 @@ class MyApp:
 
     def _on_toggle_input(self, checkbox_key, is_checked):
         for key in self.link_map[checkbox_key]:
-            self.window[key].update(visible=is_checked)
+            self.window[key].update(disabled=not is_checked)
 
     def _on_show_answer_toggle(self, values):
         show_answer = values.get('-SHOW_ANSWER-', False)
         disabled = not show_answer
         self.window['-ANS_NEW_PAGE-'].update(disabled=disabled)
         self.window['-ANS_FOOTER-'].update(disabled=disabled)
+        if values['-ANS_FOOTER-']:
+            self.window['-FOOTER_ROTATE-'].update(disabled=disabled)
 
     def _on_footer_opt_toggle(self, values):
         ans_footer = values.get('-ANS_FOOTER-', False)
@@ -535,6 +628,15 @@ class MyApp:
             text_str = text_renderer.render()
             self.window['-TEXT_VIEW-'].update(text_str, disabled=False)
             self.window['-TEXT_VIEW-'].Widget.yview_moveto(0)
+
+    def _update_settings(self, values):
+        s, diff = self.settings_mgr.update_from_values(values, self.arith_ops_dict)
+        if diff:
+            self.settings = s
+            for prob in self.problems:
+                prob.first_paren = self.settings['first_paren']
+                prob.show_equal = self.settings['show_equal']
+        return diff
 
     # ---------- Validators / Utils ----------
     def not_empty(self, v): return bool(v.strip())
