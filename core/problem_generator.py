@@ -287,6 +287,7 @@ def generate_one_problem(settings):
 def generate_problem_set(settings):
     num_problems = int(settings['num_problems'])
     allow_dup = settings['allow_dup']
+    init_random(settings)
 
     problems = []
 
@@ -307,3 +308,13 @@ def generate_problem_set(settings):
         # problems = list(all_expr)
         
     return problems
+
+def init_random(settings):
+    """乱数の初期化（seed値がある場合のみ）"""
+    if settings.get('use_seed'):
+        seed = settings.get('seed')
+        if seed:
+            try:
+                random.seed(int(seed))  # 数値に変換
+            except ValueError:
+                random.seed(seed)       # 文字列でもOK

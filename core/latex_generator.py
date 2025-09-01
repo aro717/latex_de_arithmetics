@@ -7,6 +7,8 @@ from math import gcd
 from utils import build_blocks, evaluate_blocks
 
 
+os.environ["PATH"] += ":/Library/TeX/texbin"
+
 # ------------------------------
 # BlockBuilder
 # 役割: 複数の Problem をまとめて1つの「ブロック」にする。
@@ -362,13 +364,16 @@ class LaTeXRenderer:
         title = self.settings['title'] if self.settings['title_check'] else ''
         date = self.settings['date'] if self.settings['date_check'] else ''
         name = self.settings['name'] if self.settings['name_check'] else ''
+        
 
         if self.settings['show_answer'] and self.settings['answer_pos'] == 'footer':
             answers = self.render_answers(self.builder.problems, per_col, show_answer=self.settings['show_answer'], answer_pos=self.settings['answer_pos'], footer_rotate=self.settings['footer_rotate'])
         else:
             answers = ''
-
-        preamble = f"""
+        preamble =''
+        if self.settings['use_seed']:
+            preamble += f"% SEED={self.settings['seed']}\n"
+        preamble += f"""
 \\documentclass[{paper}, {self.settings['font_size']}{landscape_opt}]{{jarticle}}
 \\usepackage[top={self.settings['margin_top']}mm,
             bottom={self.settings['margin_bottom']}mm,
@@ -471,8 +476,9 @@ class LaTeX2PDF:
     def __init__(self, latex_str: str, settings=None, cleanup=True):
         self.settings = settings
         # 出力先ディレクトリを settings から取得
-        self.output_dir = settings.get('dir_name', '.') if settings else '.'
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.output_dir = self.settings.get('dir_name', '~/Documents/LaTeXOutput') if settings else '~/Documents/LaTeXOutput'
+        output_dir = os.path.expanduser(self.output_dir)
+        os.makedirs(output_dir, exist_ok=True)
         self.cleanup = cleanup    # True なら中間ファイルを削除
         self.latex_str = latex_str
         
@@ -483,7 +489,8 @@ class LaTeX2PDF:
 
     def _cleanup_intermediate(self, filename: str):
         """PDF生成後に関連する中間ファイルを削除"""
-        base_path = os.path.join(self.output_dir, filename)
+        output_dir = os.path.expanduser(self.output_dir)
+        base_path = os.path.join(output_dir, filename)
         exts = ['.aux', '.log', '.out', '.toc', '.dvi']
         for ext in exts:
             path = base_path + ext
@@ -491,16 +498,15 @@ class LaTeX2PDF:
                 os.remove(path)
 
     def compile_pdf(self, filename='output'):
-        # tex_path = os.path.join(self.output_dir, f'{filename}.tex')
-        # pdf_path = os.path.join(self.output_dir, f'{filename}.pdf')
-        tex_path = f'{filename}.tex'
-        pdf_path = f'{filename}.pdf'
+        output_dir = os.path.expanduser(self.output_dir)
+        tex_path = os.path.join(output_dir, f'{filename}.tex')
+        pdf_path = os.path.join(output_dir, f'{filename}.pdf')
 
         with open(tex_path, 'w', encoding='utf-8') as f:
             f.write(self.latex_str)
         try:
-            subprocess.run(['platex', '-interaction=nonstopmode', tex_path], check=True, cwd=self.output_dir)
-            subprocess.run(['dvipdfmx', tex_path.replace('.tex', '.dvi')], check=True, cwd=self.output_dir)
+            subprocess.run(['platex', '-interaction=nonstopmode', f'{filename}.tex'], check=True, cwd=output_dir)
+            subprocess.run(['dvipdfmx', f'{filename}.dvi'], check=True, cwd=output_dir)
 
             # 中間ファイル削除
             if self.cleanup:

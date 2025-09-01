@@ -80,7 +80,8 @@ class SettingsManager:
         s['ans_new_page'] = values['-ANS_NEW_PAGE-']
         s['ans_footer'] = values['-ANS_FOOTER-']
         s['footer_rotate'] = values['-FOOTER_ROTATE-']
-        # s['seed'] = values['-SEED-']
+        s['use_seed'] = values['-USE_SEED-']
+        s['seed'] = values['-SEED-']
         return s
 
     def update_from_values(self, values, arith_ops_dict):
@@ -165,6 +166,20 @@ class TextSyncService:
             expr = m[0] if m[0] else m[1]
             problems.append(expr.strip())
         return problems
+
+    def extract_seed_from_tex(tex: str):
+        for line in tex.splitlines():
+            m = re.match(r"%\s*SEED=(.*)", line)
+            if m:
+                seed_str = m.group(1).strip()
+                if seed_str:
+                    try:
+                        return int(seed_str)   # 数値に戻す
+                    except ValueError:
+                        return seed_str       # 文字列シードも許容
+                else:
+                    return None
+        return None
 
 
 class ViewBuilder:
@@ -255,8 +270,8 @@ class ViewBuilder:
             allow_zero_row,
             [sg.Text('乱数 最小値:'), sg.InputText(default_text=self.settings['min_val'], size=(5, 1), key='-MIN-'),
              sg.Text('最大値:'), sg.InputText(default_text=self.settings['max_val'], size=(5, 1), key='-MAX-'),
-             # sg.Checkbox('Seed値:', key='-USE_SEED-', default=False, enable_events=True),
-             # sg.InputText(default_text=self.settings['seed'], key='-SEED-', disabled=True)
+             sg.Checkbox('Seed値:', key='-USE_SEED-', default=False, enable_events=True),
+             sg.InputText(default_text=self.settings['seed'], key='-SEED-', disabled=True)
             ],
             terms_row,
             [sg.Checkbox('問題の重複許可', key='-ALLOW_DUP-', default=self.settings['allow_dup']),
@@ -369,8 +384,6 @@ class MyApp:
           '-CHK_DATE-': ['-IN_DATE-', '-BTN_DATE-'],
           '-CHK_NAME-': ['-IN_NAME-'],
           '-USE_SEED-': ['-SEED-'],
-          # '-SHOW_ANSWER-': ['-ANS_NEW_PAGE-', '-ANS_FOOTER-'],
-          # '-ANS_FOOTER-': ['-FOOTER_ROTATE-']
         }
 
     # ---------- Validation ----------
@@ -530,6 +543,10 @@ class MyApp:
             tex_content = f.read()
 
         problem_strs = TextSyncService.extract_items_from_tex(tex_content)
+        seed = TextSyncService.extract_seed_from_tex(tex_content)
+        if seed is not None:
+            self.window['-USE_SEED-'].update(True)
+            self.window['-SEED-'].update(seed, disabled=False)
         new_problems = []
         for i, expr_latex in enumerate(problem_strs):
             expr_values, operators, total = Problem.parse_latex_expr(expr_latex)

@@ -1,5 +1,6 @@
 import os
 import sys
+import platform
 import json
 from datetime import datetime
 
@@ -11,7 +12,7 @@ from datetime import datetime
 DOC_SETTINGS = {
     'window_location': (10, 25),   # 起動時のwindowの位置
     'file_name': 'output',
-    'dir_name': '.',
+    'dir_name': '~/Documents/LaTeXOutput',
     'paper_size': 'A4',          # 'A3', 'A4', 'A5', 'B4', 'B5'
     'font_size': '11pt',         # '10pt', '11pt', '12pt'
     'margin_top': 25,            # mm
@@ -76,9 +77,16 @@ DEFAULT_SETTINGS.update(EXPAND_SETTINGS)
 
 def get_settings_path():
     if getattr(sys, 'frozen', False):  # exe化された場合
-        base_dir = os.path.dirname(sys.executable)
+        if platform.system() == "Darwin":  # macOS
+            # ユーザーごとの設定保存場所
+            base_dir = os.path.expanduser("~/.latexdearithmetics")
+            os.makedirs(base_dir, exist_ok=True)
+        else:
+            # Windows/Linux は exe の隣でOK
+            base_dir = os.path.dirname(sys.executable)
     else:  # 開発中
         base_dir = os.path.dirname(os.path.abspath(__file__))
+
     return os.path.join(base_dir, "settings.json")
 
 def load_settings():
@@ -86,7 +94,7 @@ def load_settings():
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {}  # デフォルト設定
+    return DEFAULT_SETTINGS
 
 def save_settings(settings: dict):
     path = get_settings_path()

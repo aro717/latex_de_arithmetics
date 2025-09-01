@@ -97,3 +97,13 @@ def dict_diff(old: dict, new: dict) -> dict:
         for k in new.keys() | old.keys()  # 両方にあるキーの和集合
         if old.get(k) != new.get(k)
     }
+
+def resource_path(relative_path):
+    """appでも正しく参照できるパスを返す"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller バンドル内
+        base_path = os.path.dirname(sys.executable)
+    else:
+        # 通常の Python 実行
+        base_path = os.path.dirname(__file__)
+    return os.path.join(base_path, relative_path)
