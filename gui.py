@@ -2,10 +2,11 @@ import re
 import FreeSimpleGUI as sg
 import json
 import os
+import copy
 from datetime import datetime
 from collections import Counter
 from itertools import zip_longest
-from settings import load_settings, save_settings
+from settings import load_settings, save_settings, MAX_TERMS
 from core.problem_generator import generate_problem_set
 from core.latex_generator import BlockBuilder, Problem, LaTeXRenderer, TextRenderer, LaTeX2PDF
 from utils import max_2terms, dict_diff
@@ -21,13 +22,14 @@ class SettingsManager:
     # --- 適用 ---
     def apply_to_gui(self):
         s = self.settings
-        # ヘッダ表示
-        # if s['title_check']:
-        #     self.window['-IN_TITLE-'].update(visible=True)
-        # if s['date_check']:
-        #     self.window['-IN_DATE-'].update(visible=True)
-        # if s['name_check']:
-        #     self.window['-IN_NAME-'].update(visible=True)
+
+        # ヘッダ設定の有効/無効
+        if s['title_check']:
+            self.window['-IN_TITLE-'].update(disabled=False)
+        if s['date_check']:
+            self.window['-IN_DATE-'].update(disabled=False)
+        if s['name_check']:
+            self.window['-IN_NAME-'].update(disabled=False)
         # ドメイン別の有効/無効
         domain = s['domain']
         if domain == 'Z':
@@ -36,12 +38,23 @@ class SettingsManager:
             self.window['-FIRST_PAREN-'].update(disabled=False)
             for k in ['-QFRAC-','-IRREDUCIBLE-','-QDEC-','-DECIMAL_PLACES-']:
                 self.window[k].update(disabled=False)
+        # seedの有効/無効
+        if s['use_seed']:
+            self.window['-SEED-'].update(disabled=False)
+            self.window['-SEED_TODAY-'].update(disabled=False)
         # 解答表示の有効/無効
         if s['show_answer']:
             self.window['-ANS_NEW_PAGE-'].update(disabled=False)
             self.window['-ANS_FOOTER-'].update(disabled=False)
             if s['ans_footer']:
                 self.window['-FOOTER_ROTATE-'].update(disabled=False)
+        # 項数の表示
+        n = int(s['n_terms'])
+        self.window['-NTERMS_DISP-'].update('×'.join(['R'] * n) + ' -> R' if n >= 2 else '')
+        # 乱数の有効/無効
+        if s['use_custom']:
+            self.window['-MIN-'].update(disabled=True)
+            self.window['-MAX-'].update(disabled=True)
 
     # --- 収集 ---
     def collect_from_values(self, values, arith_ops_dict):
@@ -75,6 +88,8 @@ class SettingsManager:
         s['decimal_places'] = values['-DECIMAL_PLACES-']
         s['min_val'] = values['-MIN-']
         s['max_val'] = values['-MAX-']
+        if not s['use_custom']:
+            s['custom_ranges'] = [(int(values[f'-MIN-']), int(values[f'-MAX-'])) for _ in range(int(MAX_TERMS))]
         s['show_answer'] = values['-SHOW_ANSWER-']
         s['answer_pos'] = 'new_page' if values['-ANS_NEW_PAGE-'] else 'footer'
         s['ans_new_page'] = values['-ANS_NEW_PAGE-']
@@ -100,7 +115,7 @@ class SettingsManager:
         s['date_check'] = values['-CHK_DATE-']
         s['date'] = values['-IN_DATE-']
         s['name_check'] = values['-CHK_NAME-']
-        s['name'] = values.get('-IN_NAME-')
+        s['name'] = values['-IN_NAME-']
         s['cols'] = int(values['-NCOLS-'])
         s['show_equal'] = values['-SHOW_EQUAL-']
         s['first_paren'] = values['-FIRST_PAREN-']
@@ -189,16 +204,17 @@ class ViewBuilder:
             '-CHK_TITLE-': ['-IN_TITLE-'],
             '-CHK_DATE-': ['-IN_DATE-', '-BTN_DATE-'],
             '-CHK_NAME-': ['-IN_NAME-'],
-            '-USE_SEED-': ['-SEED-']
+            '-USE_SEED-': ['-SEED-', '-SEED_TODAY-'],
         }
 
-    def build(self):
+    def build_main(self):
         s = self.settings
+
         # --- ドキュメント設定 ---
         doc_frame = sg.Frame('ドキュメント設定', [
-            [sg.Text('出力フォルダ:'), sg.InputText(default_text=s['dir_name'], key='-DIR_NAME-', size=(15, 1)),
-             sg.Button('選択', target='-DIR_NAME-', key='-SELECT_DIR-', pad=(0,0)),
-             sg.Text('ファイル名:'), sg.InputText(default_text=s['file_name'], key='-FILE_NAME-')],
+            [sg.Text('出力フォルダ:'), sg.InputText(default_text=s['dir_name'], key='-DIR_NAME-', size=(30, 1)),
+             sg.Button('選択', target='-DIR_NAME-', key='-SELECT_DIR-', pad=(0, 0))],
+            [sg.Text('ファイル名:'), sg.InputText(default_text=s['file_name'], key='-FILE_NAME-', size=(30, 1))],
             [sg.Text('用紙サイズ:'), sg.Combo(['A3','A4','A5','B4','B5'], default_value=s['paper_size'], key='-PAPER-'),
              sg.Checkbox('横向き', key='-CHK_LANDSCAPE-', default=s['landscape']),
              sg.Text('基準フォントサイズ:'), sg.Combo(['10pt','11pt','12pt'], key='-FONTSIZE-', default_value=s['font_size'])],
@@ -206,7 +222,7 @@ class ViewBuilder:
              sg.Text('下'), sg.InputText(str(s['margin_bottom']), size=(4, 1), key='-MBOTTOM-'),
              sg.Text('左'), sg.InputText(str(s['margin_left']), size=(4, 1), key='-MLEFT-'),
              sg.Text('右'), sg.InputText(str(s['margin_right']), size=(4, 1), key='-MRIGHT-')]
-        ], size=(500, 100))
+        ], expand_x=True)
 
         # --- ヘッダ設定 ---
         header_frame = sg.Frame('ヘッダ設定', [
@@ -214,10 +230,10 @@ class ViewBuilder:
              sg.InputText(default_text=s['title'], key='-IN_TITLE-', disabled=True),],
             [sg.Checkbox('日付', key='-CHK_DATE-', default=s['date_check'], enable_events=True),
              sg.InputText(default_text=s['date'], key='-IN_DATE-', size=(12, 1), disabled=True),
-             sg.CalendarButton('選択', target='-IN_DATE-', format='%Y/%m/%d', disabled=True, key='-BTN_DATE-', size=(5,1), pad=(0,0))],
+             sg.CalendarButton('選択', target='-IN_DATE-', format='%Y/%m/%d', disabled=True, key='-BTN_DATE-', size=(5, 1), pad=(0, 0))],
             [sg.Checkbox('氏名', key='-CHK_NAME-', default=s['name_check'], enable_events=True),
              sg.InputText(default_text=s['name'], key='-IN_NAME-', disabled=True)],
-        ], size=(500, 110))
+        ], expand_x=True)
 
         # --- 本文設定 ---
         # 四則演算ラベル
@@ -228,118 +244,137 @@ class ViewBuilder:
             '-MUL-': '*',
             '-DIV-': '/'
         }
-        self.ops_keys = list(self.arith_ops_dict.keys())
         arith_ops_row = [sg.Text('演算:')]
         for k, op in self.arith_ops_dict.items():
-            arith_ops_row.append(sg.Checkbox(self.ops_dict[op], key=k, default=self.settings['ops'][op]))
+            arith_ops_row.append(sg.Checkbox(self.ops_dict[op], key=k, default=s['ops'][op]))
 
-        # self.domain_options = ['N', 'Z', 'Q', 'R', 'C']
         self.domain_options = ['N', 'Z', 'Q']
         domain_row = [sg.Text('領域:')]
         for label in self.domain_options:
-            domain_row.append(sg.Radio(label, 'DOMAIN', key=f'-DOMAIN_{label}-', default=(label==self.settings['domain']), enable_events=True))
+            domain_row.append(sg.Radio(label, 'DOMAIN', key=f'-DOMAIN_{label}-', default=(label==s['domain']), enable_events=True))
         
         # オプション
-        domain_options = [sg.Frame('オプション', [
-            [sg.Checkbox('先頭の括弧', key='-FIRST_PAREN-', default=self.settings['first_paren'], disabled=True)],
-            [sg.Radio('分数', 'QREP', key='-QFRAC-', default=self.settings['frac'], enable_events=True, disabled=True),
-             sg.Checkbox('既約', key='-IRREDUCIBLE-', default=self.settings['irreducible'], disabled=True),
-             sg.Radio('小数', 'QREP', key='-QDEC-', default=self.settings['decimal'], enable_events=True, disabled=True),
-             sg.Text('小数点以下:'), sg.Spin([i for i in range(1,6)], initial_value=self.settings['decimal_places'], key='-DECIMAL_PLACES-', disabled=True)
+        domain_options_frame = [sg.Frame('領域オプション', [
+            [sg.Checkbox('先頭の括弧', key='-FIRST_PAREN-', default=s['first_paren'], disabled=True)],
+            [sg.Radio('分数', 'QREP', key='-QFRAC-', default=s['frac'], enable_events=True, disabled=True),
+             sg.Checkbox('既約', key='-IRREDUCIBLE-', default=s['irreducible'], disabled=True),
+             sg.Radio('小数', 'QREP', key='-QDEC-', default=s['decimal'], enable_events=True, disabled=True),
+             sg.Text('小数点以下:'), sg.Spin([i for i in range(1, 6)], initial_value=s['decimal_places'], key='-DECIMAL_PLACES-', disabled=True)
             ]
-          ], pad=(30,0))
+          ], pad=(30,0), expand_x=True, size=(400, 80))
         ]
 
         # 0の有無ラベル
-        allow_zero_row = [sg.Checkbox('乱数に0を許容', key='-ALLOW_ZERO-', default=self.settings['allow_zero'])]
+        allow_zero_row = [sg.Checkbox('乱数に0を許容', key='-ALLOW_ZERO-', default=s['allow_zero'])]
 
         # 項数ラベル
         terms_row = [
             sg.Text('項数:'),
-            sg.Combo([2, 3, 4], default_value=self.settings['n_terms'], key='-NTERMS-', enable_events=True),
+            sg.Spin([2, 3, 4], initial_value=s['n_terms'], key='-NTERMS-', enable_events=True),
             sg.Text('R×R -> R', key='-NTERMS_DISP-', text_color='blue')
         ]
 
         # タブ1: 四則演算
-        tab_arith = [
-            [sg.Text('問題数:'), sg.InputText(str(self.settings['num_problems']), size=(5, 1), key='-NPROBLEMS-'),
-             sg.Text('列数:'), sg.InputText(str(self.settings['cols']), size=(5, 1), key='-NCOLS-')],
-            arith_ops_row,
-            domain_row,
-            domain_options,
-            allow_zero_row,
-            [sg.Text('乱数 最小値:'), sg.InputText(default_text=self.settings['min_val'], size=(5, 1), key='-MIN-'),
-             sg.Text('最大値:'), sg.InputText(default_text=self.settings['max_val'], size=(5, 1), key='-MAX-'),
-             sg.Checkbox('Seed値:', key='-USE_SEED-', default=False, enable_events=True),
-             sg.InputText(default_text=self.settings['seed'], key='-SEED-', disabled=True)
-            ],
-            terms_row,
-            [sg.Checkbox('問題の重複許可', key='-ALLOW_DUP-', default=self.settings['allow_dup']),
-             sg.Checkbox('= を表示', key='-SHOW_EQUAL-', default=self.settings['show_equal'])],
-            [sg.Checkbox("解答表示", key="-SHOW_ANSWER-", default=self.settings['show_answer'], enable_events=True),
-                sg.Text("場所:"),
-                sg.Radio("新規ページ", "ANSWER_POS", key="-ANS_NEW_PAGE-", default=self.settings['ans_new_page'], enable_events=True, disabled=True),
-                sg.Radio("フッタ", "ANSWER_POS", key="-ANS_FOOTER-", default=self.settings['ans_footer'], enable_events=True, disabled=True),
-                sg.Checkbox('回転', key='-FOOTER_ROTATE-', default=self.settings['footer_rotate'], disabled=True)
-            ]
-        ]
+        tab_arith = [sg.Column([
+                [sg.Text('問題数:'), sg.InputText(default_text=str(s['num_problems']), size=(5, 1), key='-NPROBLEMS-'),
+                 sg.Text('列数:'), sg.InputText(default_text=str(s['cols']), size=(5, 1), key='-NCOLS-')],
+                arith_ops_row,
+                domain_row,
+                domain_options_frame,
+                allow_zero_row,
+                terms_row,
+                [sg.Text('乱数 min:'), sg.InputText(default_text=s['min_val'], size=(5, 1), key='-MIN-'),
+                 sg.Text('max:'), sg.InputText(default_text=s['max_val'], size=(5, 1), key='-MAX-'),
+                 sg.Text('カスタム有効', key='-CUSTOM_DISP-', text_color='blue', visible=False),
+                ],
+                [sg.Checkbox('Seed値:', key='-USE_SEED-', default=s['use_seed'], enable_events=True),
+                 sg.InputText(default_text=s['seed'], key='-SEED-', disabled=True, size=(15, 1)),
+                 sg.Button('今日の日付', key='-SEED_TODAY-', disabled=True)
+                ],
+                # random_options_frame,
+                [sg.Checkbox('問題の重複許可', key='-ALLOW_DUP-', default=s['allow_dup']),
+                 sg.Checkbox('= を表示', key='-SHOW_EQUAL-', default=s['show_equal'])],
+                [sg.Checkbox("解答表示", key="-SHOW_ANSWER-", default=s['show_answer'], enable_events=True),
+                    sg.Text("場所:"),
+                    sg.Radio("新規ページ", "ANSWER_POS", key="-ANS_NEW_PAGE-", default=s['ans_new_page'], enable_events=True, disabled=True),
+                    sg.Radio("フッタ", "ANSWER_POS", key="-ANS_FOOTER-", default=s['ans_footer'], enable_events=True, disabled=True),
+                    sg.Checkbox('回転', key='-FOOTER_ROTATE-', default=s['footer_rotate'], disabled=True)
+                ]
+            ], scrollable=True, vertical_scroll_only=True, expand_y=True
+        )]
 
         # タブ2: 展開
         tab_expand = [
-            [sg.Text('多項式の数:'), sg.InputText(default_text=self.settings['poly_num'], size=(5, 1), key='-POLY_NUM-')]
+            [sg.Text('多項式の数:'), sg.InputText(default_text=s['poly_num'], size=(5, 1), key='-POLY_NUM-')]
         ]
 
         tab_group = sg.TabGroup([
             [
-            sg.Tab('四則演算', tab_arith, key='-TAB_ARITH-'),
+            sg.Tab('四則演算', [tab_arith], key='-TAB_ARITH-'),
              # sg.Tab('展開', tab_expand, key='-TAB_EXPAND-')
              ]
-        ], key='-TAB_GROUP-', size=(480, 300), pad=(10,5))
-        # ], key='-TAB_GROUP-', size=(480, 300), pad=(10,5)) # win用
+        ], key='-TAB_GROUP-', expand_x=True, expand_y=True)
 
         execution_buttons = [
+            sg.Button('カスタム', key='-CUSTOM-'),
             sg.Button('LaTeX生成', key='-GEN_LATEX-'),
             sg.Button('LaTeX読込', key='-LOAD_LATEX-'),
-            sg.Button('', key='-UPDATE_LATEX-', size=(8,1), disabled=True), # LaTeX更新
-            sg.Button('PDF生成', key='-GEN_PDF-', size=(8,1)),
+            sg.Button('', key='-UPDATE_LATEX-', size=(8, 1), disabled=True), # LaTeX更新
+            sg.Button('PDF生成', key='-GEN_PDF-', size=(8, 1)),
             sg.Button('終了')
         ]
 
-        body_frame = sg.Frame('本文設定', [[tab_group]], size=(500, 340))
-        # body_frame = sg.Frame('本文設定', [[tab_group]], size=(500, 340)) # win用
+        body_frame = sg.Frame('本文設定', [[tab_group]], expand_x=True, expand_y=True)
 
         left_col = sg.Column([
             [doc_frame],
             [header_frame],
             [body_frame],
-            [sg.Multiline('', key='-LOG-', size=(60, 10),
-            # [sg.Multiline('', key='-LOG-', size=(69, 8), # win用
-                text_color='white', background_color='black',
-                autoscroll=True, disabled=True)]
-        #   [sg.Button('LaTeX生成', key='-GEN_LATEX-'), sg.Button('PDF生成', key='-GEN_PDF-'), sg.Button('終了')]
-        ], vertical_alignment='top')
+        ], vertical_alignment='top', scrollable=False, expand_x=True, expand_y=True)
 
         right_col = sg.Column([
             [sg.TabGroup([
                 [sg.Tab('LaTeXビュー', [
-                    [sg.Multiline('', size=(60, 40), key='-LATEX_VIEW-', autoscroll=True, disabled=True)]
+                    [sg.Multiline('', size=(60, 35), key='-LATEX_VIEW-', autoscroll=True, disabled=True)]
                 ])],
                 [sg.Tab('Textビュー', [
-                    [sg.Multiline('', size=(60, 40), key='-TEXT_VIEW-', autoscroll=True, disabled=True, enable_events=True)]
+                    [sg.Multiline('', size=(60, 35), key='-TEXT_VIEW-', autoscroll=True, disabled=True, enable_events=True)]
                 ])]
-            ], key='-TAB_VIEW-')],
+            ], key='-TAB_VIEW-', expand_x=True, expand_y=True)],
+            [sg.Multiline('', key='-LOG-', size=(60, 8),
+                text_color='white', background_color='black',
+                autoscroll=True, disabled=True)],
             execution_buttons,
-        ], vertical_alignment='top')
+        ], vertical_alignment='top', expand_y=True)
 
         layout = [[left_col, right_col]]
 
-        # self.window = sg.Window('LaTeX de Arithmetics', layout, finalize=True)
+        return layout
+
+    def build_custom(self, settings):
+        s = settings
+        custom_ranges = s.get('custom_ranges', [('', '') for _ in range(MAX_TERMS)])
+        disabled = [(i >= s['n_terms']) or not s['use_custom'] for i in range(MAX_TERMS)]
+        layout = [
+            [sg.Frame('乱数オプション', [
+                [sg.Checkbox('カスタム乱数', key='-USE_CUSTOM-', default=s['use_custom'], enable_events=True)],
+                *[[sg.Text(f'項{i+1}: min'), 
+                   sg.InputText(str(custom_ranges[i][0]), size=(5,1), key=f'-MIN{i}-', disabled=disabled[i]),
+                   sg.Text('max'),
+                   sg.InputText(str(custom_ranges[i][1]), size=(5,1), key=f'-MAX{i}-', disabled=disabled[i])]
+                  for i in range(MAX_TERMS)]
+              ])
+            ],
+            [sg.Button('閉じる')]
+        ]
+
         return layout
 
 
 class MyApp:
     def __init__(self):
         self.settings = load_settings()
+        self.settings_origin = copy.deepcopy(self.settings)
         if self.settings.get('date_check', False) and not self.settings.get('date'):
             self.settings['date'] = datetime.today().strftime('%Y/%m/%d')
 
@@ -357,6 +392,7 @@ class MyApp:
             location=last_loc,
             finalize=True
         )
+        self.custom_window = None # カスタムウィンドウの存在
         self.link_map = self._link_map()  # 既存の link_map を返す小ヘルパーでもOK
 
         # --- Services ---
@@ -376,14 +412,14 @@ class MyApp:
     # ---------- Layout ----------
     def _build_layout(self):
         # レイアウト構築を ViewBuilder に一任
-        return self.view.build()
+        return self.view.build_main()
 
     def _link_map(self):
         return {
           '-CHK_TITLE-': ['-IN_TITLE-'],
           '-CHK_DATE-': ['-IN_DATE-', '-BTN_DATE-'],
           '-CHK_NAME-': ['-IN_NAME-'],
-          '-USE_SEED-': ['-SEED-'],
+          '-USE_SEED-': ['-SEED-', '-SEED_TODAY-'],
         }
 
     # ---------- Validation ----------
@@ -422,42 +458,68 @@ class MyApp:
             '-LOAD_LATEX-': self._on_load_latex_clicked,
             '-GEN_PDF-': self._on_generate_pdf_clicked,
             '-SELECT_DIR-': self._on_dir_clicked,
+            '-CUSTOM-': self._on_custom_clicked,
+            '-SEED_TODAY-': self._on_today_clicked
         }
         while True:
-            event, values = self.window.read(timeout=100) # timeoutでポーリング
-            if event in (sg.WINDOW_CLOSED, '終了'):
-                # 閉じる直前に位置を保存
-                loc = self.window.current_location()
-                if loc == (None, None):
-                    loc = self.settings.get('window_location', (10, 25))
-                self.settings['window_location'] = loc
-                save_settings(self.settings)
-                break
+            window, event, values = sg.read_all_windows(timeout=100) # timeoutでポーリング
+            if window == self.window:
+                if event in (sg.WINDOW_CLOSED, '終了'):
+                    # 閉じる直前に位置を保存
+                    loc = self.window.current_location()
+                    if loc == (None, None):
+                        loc = self.settings.get('window_location', (10, 25))
+                    self.settings_origin['window_location'] = loc
+                    save_settings(self.settings_origin)
+                    break
 
-            # 共通：チェックボックス可視切替
-            if event in self.link_map:
-                self._on_toggle_input(event, values[event])
+                # 共通：チェックボックス可視切替
+                if event in self.link_map:
+                    self._on_toggle_input(event, values[event])
 
-            if event == '-SHOW_ANSWER-':
-                self._on_show_answer_toggle(values)
-            if event in [f'-ANS_{label}-' for label in ['NEW_PAGE', 'FOOTER']]:
-                self._on_footer_opt_toggle(values)
+                if event == '-SHOW_ANSWER-':
+                    self._on_show_answer_toggle(values)
+                if event in [f'-ANS_{label}-' for label in ['NEW_PAGE', 'FOOTER']]:
+                    self._on_footer_opt_toggle(values)
 
-            # 入力系イベント
-            if event == '-NTERMS-':
-                self._on_nterms_changed(values)
-            if event in [f'-DOMAIN_{label}-' for label in self.domain_options]:
-                self._on_domain_changed(values)
-            if event in ['-QFRAC-', '-QDEC-']:
-                self._on_qrepr_changed(event)
+                # 入力系イベント
+                if event == '-NTERMS-':
+                    self._on_nterms_changed(values)
+                if event in [f'-DOMAIN_{label}-' for label in self.domain_options]:
+                    self._on_domain_changed(values)
+                if event in ['-QFRAC-', '-QDEC-']:
+                    self._on_qrepr_changed(event)
 
-            # Textビューの編集検知
-            if event == '-TEXT_VIEW-':
-                self._on_text_changed()
+                # Textビューの編集検知
+                if event == '-TEXT_VIEW-':
+                    self._on_text_changed()
 
-            # ボタン類
-            if event in handler:
-                handler[event](values)
+                # ボタン類
+                if event in handler:
+                    handler[event](values)
+
+                # スピン変更があれば設定に反映
+                # try:
+                #     self.settings['n_terms'] = int(values['-TERMS-'])
+                # except Exception:
+                #     pass
+
+            elif window == self.custom_window:
+                if event in (sg.WINDOW_CLOSED, '閉じる'):
+                    if self.settings['use_custom']:
+                        self.settings['custom_ranges'] = [(int(values[f'-MIN{i}-']), int(values[f'-MAX{i}-'])) for i in range(int(MAX_TERMS))]
+                    self.custom_window.close()
+                    self.custom_window = None
+
+                if event == '-USE_CUSTOM-':
+                    self._on_custom_changed(values)
+
+                # if event == '-TERMS-':
+                #     new_terms = int(values['-TERMS-'])
+                #     for i in range(4):
+                #         window[f'-MIN{i}-'].update(disabled=(i >= new_terms))
+                #         window[f'-MAX{i}-'].update(disabled=(i >= new_terms))
+                #     num_terms = new_terms
 
         self.window.close()
 
@@ -479,6 +541,19 @@ class MyApp:
                 folder = os.path.relpath(folder, start=current_dir) # 相対パス
             self.window['-DIR_NAME-'].update(folder)
         return None
+
+    def _on_custom_clicked(self, values):
+        """カスタム設定ウィンドウを表示"""
+        if self.custom_window is not None:
+            # すでに開いている場合はフォーカスを戻す
+            self.custom_window.bring_to_front()
+            return
+        layout = self.view.build_custom(self.settings)
+        self.custom_window = sg.Window('カスタム設定', layout, modal=False, finalize=True)
+
+    def _on_today_clicked(self, values):
+        """seed値を今日の日付から生成"""
+        self.window['-SEED-'].update(datetime.today().strftime('%Y%m%d'))
 
     def _on_generate_clicked(self, values):
         errs = self.settings_mgr.validate(values)
@@ -561,6 +636,9 @@ class MyApp:
         diff_settings = self._update_settings(values)
         filename = self.settings['file_name'].strip() or sg.popup_get_text('ファイル名を入力してください')
         if not filename: return
+        if self.problems == []:
+            self.problems = [Problem(data, first_paren=self.settings.get('first_paren', False), show_equal=self.settings.get('show_equal', True))
+                         for data in generate_problem_set(self.settings)]
         builder = BlockBuilder(self.problems, self.settings)
         latex_renderer = LaTeXRenderer(builder, self.settings)
         latex_str = latex_renderer.render_pdf()
@@ -569,6 +647,7 @@ class MyApp:
         pdf_gen = LaTeX2PDF.from_latex(latex_str, self.settings)
         pdf_path = pdf_gen.compile_pdf(filename)
         save_settings(self.settings)
+        self.settings_origin = copy.deepcopy(self.settings)
         self.log(f'PDF生成完了: {pdf_path}')
 
     def _on_text_changed(self):
@@ -611,6 +690,12 @@ class MyApp:
     def _on_nterms_changed(self, values):
         try:
             n = int(values['-NTERMS-'])
+            self.settings['n_terms'] = n
+            if self.custom_window:
+                for i in range(MAX_TERMS):
+                    disabled = (i >= n) or not self.settings['use_custom']
+                    self.custom_window[f'-MIN{i}-'].update(disabled=disabled)
+                    self.custom_window[f'-MAX{i}-'].update(disabled=disabled)
             self.window['-NTERMS_DISP-'].update('×'.join(['R'] * n) + ' -> R' if n >= 2 else '')
         except ValueError:
             self.window['-NTERMS_DISP-'].update('')
@@ -631,6 +716,21 @@ class MyApp:
         ans_footer = values.get('-ANS_FOOTER-', False)
         disabled = not ans_footer
         self.window['-FOOTER_ROTATE-'].update(disabled=disabled)
+
+    # ----- Custom Window -----
+    def _on_custom_changed(self, values):
+        use_custom = values['-USE_CUSTOM-']
+        self.settings['use_custom'] = values['-USE_CUSTOM-']
+        n_terms = int(self.settings['n_terms'])
+        # 共通乱数入力はカスタムOFFのとき有効
+        self.window['-MIN-'].update(disabled=use_custom)
+        self.window['-MAX-'].update(disabled=use_custom)
+        self.window['-CUSTOM_DISP-'].update(visible=use_custom)
+        if self.custom_window is not None:
+            for i in range(MAX_TERMS):
+                disabled = (i >= n_terms) or not use_custom
+                self.custom_window[f'-MIN{i}-'].update(disabled=disabled)
+                self.custom_window[f'-MAX{i}-'].update(disabled=disabled)
 
     # ---------- Render Helpers ----------
     def _render_all_views(self, latex_only=False):
@@ -680,6 +780,7 @@ class MyApp:
         except Exception:
             return False
     def log(self, message, error=False):
+        dt_now = datetime.now().strftime('%H:%M')
         color = 'red' if error else 'white'
         prefix = '[ERROR]' if error else '[INFO]'
-        self.window['-LOG-'].update(f"{prefix} {message}\n", append=True, text_color_for_value=color)
+        self.window['-LOG-'].update(f"{dt_now} {prefix} {message}\n", append=True, text_color_for_value=color)

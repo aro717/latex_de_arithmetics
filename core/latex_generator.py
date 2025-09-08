@@ -1,13 +1,17 @@
 import os
 import subprocess
 import re
+import platform
 from fractions import Fraction
 from fractions_utils import RawFraction, normalize_fraction, paren_if_negative
 from math import gcd
 from utils import build_blocks, evaluate_blocks
 
 
-os.environ["PATH"] += ":/Library/TeX/texbin"
+# if platform.system() == "Darwin":  # macOS
+#     os.environ["PATH"] += ":/Library/TeX/texbin"
+# elif platform.system() == "Windows":
+#     os.environ["PATH"] += r";C:\texlive\2024\bin\win32"
 
 # ------------------------------
 # BlockBuilder

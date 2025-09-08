@@ -8,15 +8,22 @@ from math import gcd
 # ------------------------------
 # 値生成
 # ------------------------------
-def generate_value(settings, allow_zero=None):
+def generate_value(settings, allow_zero=None, term_idx=None):
+    """
+    term_idx: int, 各項のカスタム範囲を使う場合に項番号を指定
+    """
     domain = settings['domain']
     if allow_zero is None:
         allow_zero = settings['allow_zero']
     q_repr = settings['q_repr']
     irreducible = settings['irreducible']
     decimal_places = int(settings['decimal_places'])
-    min_val = int(settings['min_val'])
-    max_val = int(settings['max_val'])
+    if term_idx is None:
+        min_val = int(settings['min_val'])
+        max_val = int(settings['max_val'])
+    else:
+        min_val, max_val = settings['custom_ranges'][term_idx]
+        min_val, max_val = int(min_val), int(max_val)
     
     """抽選リストから1つ選ぶ"""
     candidates = []
@@ -71,6 +78,9 @@ def generate_value(settings, allow_zero=None):
 
     return random.choice(candidates)
 
+# ------------------------------
+# 四則演算
+# ------------------------------
 def evaluate_block(block):
     """
     ブロックの評価
@@ -106,12 +116,10 @@ def evaluate_block(block):
 
     # 調整後の表現を作る（nums[0] を置き換えるだけ）
     expr_parts = [str(adjusted_first)]
-    # cur_val = adjusted_first ???
     for i, op in enumerate(ops):
         n = nums[i + 1]
         expr_parts.append(op)
         expr_parts.append(str(n))
-        # cur_val はすでに上で求めたが、ここでは式文字列のための結合
     block_expr = ''.join(expr_parts)
 
     # block 値は current
@@ -189,26 +197,24 @@ def assemble_expr(blocks, base_ops, max_val, domain='N'):
         expr_parts.append(eval_blocks[i + 1]['expr'])
         total += eval_blocks[i + 1]['val'] if op == '+' else -eval_blocks[i + 1]['val']
     expr = ' '.join(expr_parts)
+    
+    vals = []
+    for block in eval_blocks:
+        for i in block['block']['nums']:
+            vals.append(i)
+    
+    return expr, vals, total
 
-    return expr, total
 
-# ------------------------------
-# 1問生成
-# ------------------------------
+# --- 1問生成 ---
 def generate_one_problem(settings):
-    num_problems = int(settings['num_problems'])
     n_terms = int(settings['n_terms'])
     domain = settings['domain']
     allow_zero = settings['allow_zero']
-    allow_dup = settings['allow_dup']
-    show_equal = settings['show_equal']
     ops = settings['ops'] # {'+': True, '-': False, ...}
     first_paren = settings['first_paren']
-    q_repr = settings['q_repr']
-    irreducible = settings['irreducible']
-    decimal_places = int(settings['decimal_places'])
-    min_val = int(settings['min_val'])
-    max_val = int(settings['max_val'])
+    # max_val = int(settings['max_val'])
+    max_val = max(max_i for (_, max_i) in settings['custom_ranges'])
 
     selected_ops = [op for op, v in ops.items() if v]
 
@@ -222,9 +228,9 @@ def generate_one_problem(settings):
         for i in range(n_terms):
             # 直前が '/' のときは 0 を避ける
             if i > 0 and operators[i - 1] == '/':
-                num = generate_value(settings, allow_zero=False)
+                num = generate_value(settings, allow_zero=False, term_idx=i)
             else:
-                num = generate_value(settings, allow_zero=allow_zero)
+                num = generate_value(settings, allow_zero=allow_zero, term_idx=i)
             numbers.append(num)
     elif domain == 'Z':
     # if '/' in operators and domain in ['Z']:
@@ -232,7 +238,7 @@ def generate_one_problem(settings):
         for i in range(n_terms):
             # 直前が / の場合は 0 を避ける
             force_nonzero = (i > 0 and operators[i - 1] == '/')
-            num = generate_value(settings, allow_zero=(allow_zero and not force_nonzero))
+            num = generate_value(settings, allow_zero=(allow_zero and not force_nonzero), term_idx=i)
             numbers.append(num)
         # 割り算チェーン調整
         seg_start = 0
@@ -249,7 +255,7 @@ def generate_one_problem(settings):
         for i in range(n_terms):
             # 直前が / の場合は 0 を避ける
             force_nonzero = (i > 0 and operators[i - 1] == '/')
-            num = generate_value(settings, allow_zero=(allow_zero and not force_nonzero))
+            num = generate_value(settings, allow_zero=(allow_zero and not force_nonzero), term_idx=i)
             numbers.append(num)
     else:
         numbers = [generate_value(settings) for _ in range(n_terms)]
@@ -257,7 +263,7 @@ def generate_one_problem(settings):
     if domain in ['N', 'Z']:
         # ブロック化 → 評価（割り算調整）→ 減算回避の並べ替え
         blocks, base_ops = build_blocks(numbers, operators)
-        expr_str, total = assemble_expr(blocks, base_ops, max_val)
+        expr_str, numbers, total = assemble_expr(blocks, base_ops, max_val, domain)
     else:
         # Q や他のドメインは単純連結
         expr_str = paren_if_negative(numbers[0], first_paren, is_first=True)
