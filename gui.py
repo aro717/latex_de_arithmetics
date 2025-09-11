@@ -42,10 +42,15 @@ class SettingsManager:
         if s['use_seed']:
             self.window['-SEED-'].update(disabled=False)
             self.window['-SEED_TODAY-'].update(disabled=False)
+        # =の改行の有効/無効
+        if s['show_equal']:
+            self.window['-LINE_BREAK-'].update(disabled=False)
         # 解答表示の有効/無効
         if s['show_answer']:
             self.window['-ANS_NEW_PAGE-'].update(disabled=False)
             self.window['-ANS_FOOTER-'].update(disabled=False)
+            if s['ans_new_page']:
+                self.window['-BOXED-'].update(disabled=False)
             if s['ans_footer']:
                 self.window['-FOOTER_ROTATE-'].update(disabled=False)
         # 項数の表示
@@ -81,6 +86,7 @@ class SettingsManager:
         s['allow_zero'] = values['-ALLOW_ZERO-']
         s['allow_dup'] = values['-ALLOW_DUP-']
         s['show_equal'] = values['-SHOW_EQUAL-']
+        s['line_break'] = values['-LINE_BREAK-']
         s['ops'] = { '+': values['-ADD-'], '-': values['-SUB-'], '*': values['-MUL-'], '/': values['-DIV-'] }
         s['first_paren'] = values['-FIRST_PAREN-']
         s['q_repr'] = 'frac' if values['-QFRAC-'] else 'decimal'
@@ -92,6 +98,7 @@ class SettingsManager:
             s['custom_ranges'] = [(int(values[f'-MIN-']), int(values[f'-MAX-'])) for _ in range(int(MAX_TERMS))]
         s['show_answer'] = values['-SHOW_ANSWER-']
         s['answer_pos'] = 'new_page' if values['-ANS_NEW_PAGE-'] else 'footer'
+        s['boxed'] = values['-BOXED-']
         s['ans_new_page'] = values['-ANS_NEW_PAGE-']
         s['ans_footer'] = values['-ANS_FOOTER-']
         s['footer_rotate'] = values['-FOOTER_ROTATE-']
@@ -118,9 +125,11 @@ class SettingsManager:
         s['name'] = values['-IN_NAME-']
         s['cols'] = int(values['-NCOLS-'])
         s['show_equal'] = values['-SHOW_EQUAL-']
+        s['line_break'] = values['-LINE_BREAK-']
         s['first_paren'] = values['-FIRST_PAREN-']
         s['show_answer'] = values['-SHOW_ANSWER-']
         s['answer_pos'] = 'new_page' if values['-ANS_NEW_PAGE-'] else 'footer'
+        s['boxed'] = values['-BOXED-']
         s['ans_new_page'] = values['-ANS_NEW_PAGE-']
         s['ans_footer'] = values['-ANS_FOOTER-']
         s['footer_rotate'] = values['-FOOTER_ROTATE-']
@@ -205,6 +214,7 @@ class ViewBuilder:
             '-CHK_DATE-': ['-IN_DATE-', '-BTN_DATE-'],
             '-CHK_NAME-': ['-IN_NAME-'],
             '-USE_SEED-': ['-SEED-', '-SEED_TODAY-'],
+            '-SHOW_EQUAL-': ['-LINE_BREAK-'],
         }
 
     def build_main(self):
@@ -292,14 +302,17 @@ class ViewBuilder:
                  sg.Button('今日の日付', key='-SEED_TODAY-', disabled=True)
                 ],
                 # random_options_frame,
-                [sg.Checkbox('問題の重複許可', key='-ALLOW_DUP-', default=s['allow_dup']),
-                 sg.Checkbox('= を表示', key='-SHOW_EQUAL-', default=s['show_equal'])],
+                [sg.Checkbox('問題の重複許可', key='-ALLOW_DUP-', default=s['allow_dup'])],
+                [sg.Checkbox('= を表示', key='-SHOW_EQUAL-', default=s['show_equal'], enable_events=True),
+                 sg.Checkbox('改行', key='-LINE_BREAK-', default=s['line_break'], disabled=True)],
                 [sg.Checkbox("解答表示", key="-SHOW_ANSWER-", default=s['show_answer'], enable_events=True),
                     sg.Text("場所:"),
                     sg.Radio("新規ページ", "ANSWER_POS", key="-ANS_NEW_PAGE-", default=s['ans_new_page'], enable_events=True, disabled=True),
+                    sg.Checkbox('囲み枠', key='-BOXED-', default=s['boxed'], disabled=True),
                     sg.Radio("フッタ", "ANSWER_POS", key="-ANS_FOOTER-", default=s['ans_footer'], enable_events=True, disabled=True),
                     sg.Checkbox('回転', key='-FOOTER_ROTATE-', default=s['footer_rotate'], disabled=True)
-                ]
+                ],
+                [sg.Button('カスタム', key='-CUSTOM-')],
             ], scrollable=True, vertical_scroll_only=True, expand_y=True
         )]
 
@@ -316,7 +329,6 @@ class ViewBuilder:
         ], key='-TAB_GROUP-', expand_x=True, expand_y=True)
 
         execution_buttons = [
-            sg.Button('カスタム', key='-CUSTOM-'),
             sg.Button('LaTeX生成', key='-GEN_LATEX-'),
             sg.Button('LaTeX読込', key='-LOAD_LATEX-'),
             sg.Button('', key='-UPDATE_LATEX-', size=(8, 1), disabled=True), # LaTeX更新
@@ -416,10 +428,11 @@ class MyApp:
 
     def _link_map(self):
         return {
-          '-CHK_TITLE-': ['-IN_TITLE-'],
-          '-CHK_DATE-': ['-IN_DATE-', '-BTN_DATE-'],
-          '-CHK_NAME-': ['-IN_NAME-'],
-          '-USE_SEED-': ['-SEED-', '-SEED_TODAY-'],
+            '-CHK_TITLE-': ['-IN_TITLE-'],
+            '-CHK_DATE-': ['-IN_DATE-', '-BTN_DATE-'],
+            '-CHK_NAME-': ['-IN_NAME-'],
+            '-USE_SEED-': ['-SEED-', '-SEED_TODAY-'],
+            '-SHOW_EQUAL-': ['-LINE_BREAK-'],
         }
 
     # ---------- Validation ----------
@@ -475,11 +488,12 @@ class MyApp:
 
                 # 共通：チェックボックス可視切替
                 if event in self.link_map:
-                    self._on_toggle_input(event, values[event])
+                    self._on_toggle_input(event, values)
 
                 if event == '-SHOW_ANSWER-':
                     self._on_show_answer_toggle(values)
                 if event in [f'-ANS_{label}-' for label in ['NEW_PAGE', 'FOOTER']]:
+                    self._on_newpage_opt_toggle(values)
                     self._on_footer_opt_toggle(values)
 
                 # 入力系イベント
@@ -561,7 +575,7 @@ class MyApp:
 
         self.settings_mgr.collect_from_values(values, self.arith_ops_dict)
         # Problem作成
-        self.problems = [Problem(data, first_paren=self.settings.get('first_paren', False), show_equal=self.settings.get('show_equal', True))
+        self.problems = [Problem(data, first_paren=self.settings.get('first_paren', False), show_equal=self.settings.get('show_equal', True), line_break=self.settings.get('line_break', False))
                          for data in generate_problem_set(self.settings)]
         self._render_all_views()
         self.log('問題生成 + ビュー更新完了')
@@ -637,7 +651,7 @@ class MyApp:
         filename = self.settings['file_name'].strip() or sg.popup_get_text('ファイル名を入力してください')
         if not filename: return
         if self.problems == []:
-            self.problems = [Problem(data, first_paren=self.settings.get('first_paren', False), show_equal=self.settings.get('show_equal', True))
+            self.problems = [Problem(data, first_paren=self.settings.get('first_paren', False), show_equal=self.settings.get('show_equal', True), line_break=self.settings.get('line_break', False))
                          for data in generate_problem_set(self.settings)]
         builder = BlockBuilder(self.problems, self.settings)
         latex_renderer = LaTeXRenderer(builder, self.settings)
@@ -700,17 +714,27 @@ class MyApp:
         except ValueError:
             self.window['-NTERMS_DISP-'].update('')
 
-    def _on_toggle_input(self, checkbox_key, is_checked):
-        for key in self.link_map[checkbox_key]:
-            self.window[key].update(disabled=not is_checked)
+    def _on_toggle_input(self, key, values):
+        if key not in self.link_map:
+            return
+        is_checked = values.get(key, False)
+        for target in self.link_map[key]:
+            self.window[target].update(disabled=not is_checked)
 
     def _on_show_answer_toggle(self, values):
         show_answer = values.get('-SHOW_ANSWER-', False)
         disabled = not show_answer
         self.window['-ANS_NEW_PAGE-'].update(disabled=disabled)
         self.window['-ANS_FOOTER-'].update(disabled=disabled)
+        if values['-ANS_NEW_PAGE-']:
+            self.window['-BOXED-'].update(disabled=disabled)
         if values['-ANS_FOOTER-']:
             self.window['-FOOTER_ROTATE-'].update(disabled=disabled)
+
+    def _on_newpage_opt_toggle(self, values):
+        ans_newpage = values.get('-ANS_NEW_PAGE-', False)
+        disabled = not ans_newpage
+        self.window['-BOXED-'].update(disabled=disabled)
 
     def _on_footer_opt_toggle(self, values):
         ans_footer = values.get('-ANS_FOOTER-', False)
@@ -753,6 +777,7 @@ class MyApp:
             for prob in self.problems:
                 prob.first_paren = self.settings['first_paren']
                 prob.show_equal = self.settings['show_equal']
+                prob.line_break = self.settings['line_break']
         return diff
 
     # ---------- Validators / Utils ----------

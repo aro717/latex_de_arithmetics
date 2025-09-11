@@ -38,6 +38,7 @@ ARITH_SETTINGS = {
     'allow_zero': False,         # 0を許容
     'allow_dup': False,          # 重複許可
     'show_equal': True,          # =表示
+    'line_break': False,
     'ops': {                     # 演算子のON/OFF
         '+': True,
         '-': False,
@@ -57,6 +58,7 @@ ARITH_SETTINGS = {
     'custom_ranges': [(1, 9), (1, 9), (1, 9), (1, 9)],
     'show_answer': False,        # 解答表示
     'answer_pos': 'new_page',    # 表示場所
+    'boxed': True,
     'ans_new_page': True,
     'ans_footer': False,
     'footer_rotate': False,      # フッターで回転させるか

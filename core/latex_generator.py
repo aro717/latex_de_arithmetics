@@ -27,7 +27,7 @@ class BlockBuilder:
         self.problems = problems
         self.settings = settings
 
-    def build_block(self, mode='text_pdf', show_answer=False) -> str:
+    def build_block(self, mode='text_pdf', show_answer=False, boxed=True) -> str:
         """mode: 'latex_pdf' | 'latex_source' | 'text'"""
         num_problems = len(self.problems)
         cols = int(self.settings['cols'])
@@ -36,7 +36,7 @@ class BlockBuilder:
         problems = []
         for i, p in enumerate(self.problems, start=1):
             if mode == 'latex_pdf':
-                problems.append(p.to_latex_pdf(show_answer))
+                problems.append(p.to_latex_pdf(show_answer, boxed))
             elif mode == 'latex_source':
                 problems.append(p.to_latex_source())
             elif mode == 'text':
@@ -75,7 +75,7 @@ class BlockBuilder:
 # ポイント: 式の構造に応じて演算子や括弧、分数表記を変換する。
 # ------------------------------
 class Problem:
-    def __init__(self, data=None, first_paren=False, show_equal=True):
+    def __init__(self, data=None, first_paren=False, show_equal=True, line_break=False):
         """
         expr_values : List[int|Fraction]  数値のまま保持
         operators   : List[str]            '+','-','*','/' など
@@ -88,9 +88,10 @@ class Problem:
         self.total = data.get('total', 0)
         self.first_paren = first_paren
         self.show_equal = show_equal
+        self.line_break = line_break
     
     # --- LaTeX 文字列化 --- #
-    def _format_latex(self, pdf_mode: bool = False, show_answer: bool = False) -> str:
+    def _format_latex(self, pdf_mode=False, show_answer=False, boxed=True) -> str:
         """符号や分数、演算子を LaTeX 用に整形"""
         parts = []
         for i, val in enumerate(self.expr_values):
@@ -133,9 +134,15 @@ class Problem:
         if self.show_equal or show_answer:
             latex = latex.rstrip()  # 念のため空白除去
             if not latex.endswith('='):
-                latex += ' ='
+                if self.line_break and pdf_mode:
+                    latex += r'\\[1zh] ='
+                else:
+                    latex += ' ='
         if show_answer:
-            latex += f'\\boxed{{{str(self.total)}}}'
+            if boxed:
+                latex += f'\\boxed{{{str(self.total)}}}'
+            else:
+                latex += f'{str(self.total)}'
         return latex
 
     def from_text_to_latex(self, text_expr):
@@ -196,8 +203,8 @@ class Problem:
         return rf'\item ${latex}$'
 
     # --- PDF出力用 --- #
-    def to_latex_pdf(self, show_answer=False) -> str:
-        latex = self._format_latex(pdf_mode=True, show_answer=show_answer)
+    def to_latex_pdf(self, show_answer=False, boxed=True) -> str:
+        latex = self._format_latex(pdf_mode=True, show_answer=show_answer, boxed=boxed)
         return rf'\item $\displaystyle {latex}$\vfill'
 
     @classmethod
@@ -395,14 +402,14 @@ class LaTeXRenderer:
 """.strip()
         problems = self.builder.build_block('latex_pdf')
         if self.settings['show_answer'] and self.settings['answer_pos'] == 'new_page':
-            answers = self.render_answers(self.builder.problems, per_col, show_answer=self.settings['show_answer'], answer_pos=self.settings['answer_pos'])
+            answers = self.render_answers(self.builder.problems, per_col, show_answer=self.settings['show_answer'], answer_pos=self.settings['answer_pos'], boxed=self.settings['boxed'])
         return preamble + problems + answers + r'\end{document}'
 
     def render_source(self):
         return self.builder.build_block('latex_source')
 
     # --- 解答表示用
-    def render_answers(self, problems, cols, show_answer=False, answer_pos="new_page", footer_rotate=False):
+    def render_answers(self, problems, cols, show_answer=False, answer_pos="new_page", boxed=True, footer_rotate=False):
         """
         problems: [(問題文字列, 解答文字列), ...]
         show_answer: bool, 解答を表示するか
@@ -415,7 +422,7 @@ class LaTeXRenderer:
         if show_answer:
             if answer_pos == "new_page":
                 latex_code += "\\newpage\n"
-                latex_code += self.builder.build_block('latex_pdf', show_answer=show_answer)
+                latex_code += self.builder.build_block('latex_pdf', show_answer=show_answer, boxed=boxed)
             elif answer_pos == "footer":
                 # フッター用に (番号, 解答) リストを作る
                 answers_list = [(i+1, prob.total) for i, prob in enumerate(problems)]
